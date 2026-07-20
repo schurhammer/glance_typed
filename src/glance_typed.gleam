@@ -272,9 +272,54 @@ pub type Expression {
   BinaryOperator(
     typ: Type,
     location: Span,
-    name: g.BinaryOperator,
+    name: BinaryOperator,
     left: Expression,
     right: Expression,
+  )
+  Pipe(typ: Type, location: Span, left: Expression, right: PipeInto)
+}
+
+pub type BinaryOperator {
+  // Boolean logic
+  And
+  Or
+
+  // Equality
+  Eq
+  NotEq
+
+  // Order comparison
+  LtInt
+  LtEqInt
+  LtFloat
+  LtEqFloat
+  GtEqInt
+  GtInt
+  GtEqFloat
+  GtFloat
+
+  // Maths
+  AddInt
+  AddFloat
+  SubInt
+  SubFloat
+  MultInt
+  MultFloat
+  DivInt
+  DivFloat
+  RemainderInt
+
+  // Strings
+  Concatenate
+}
+
+pub type PipeInto {
+  PipeIntoEcho(message: Option(Expression))
+  PipeIntoFnCapture(
+    label: Option(String),
+    function: Expression,
+    arguments_before: List(Field(Expression)),
+    arguments_after: List(Field(Expression)),
   )
 }
 
@@ -453,11 +498,11 @@ pub type Error {
   InvalidAttributeArgument(location: Location)
 }
 
-pub type QName {
+type QName {
   QName(module: String, name: String)
 }
 
-pub type Context {
+type Context {
   Context(
     current_definition: String,
     current_span: Span,
@@ -471,10 +516,10 @@ pub type Context {
   )
 }
 
-pub type LocalEnv =
+type LocalEnv =
   Dict(String, Type)
 
-pub type TypeEnv =
+type TypeEnv =
   Dict(String, Type)
 
 /// Run type inference on a `glance.Module`.
@@ -1921,7 +1966,9 @@ fn infer_body(
           #(c, [statement, ..rest])
         }
         g.Use(span, patterns, function) -> {
-          // TODO infer without desugaring
+          // desugar for inference: generate an fn() with one argument per pattern,
+          // and the remaining statements in the current body as its body, which is
+          // passed as the final callback argument to the specified function call.
           let #(span, fun, args) = case function {
             g.Call(span, fun, args) -> #(span, fun, args)
             _ -> #(span, function, [])
@@ -1930,14 +1977,17 @@ fn infer_body(
             list.index_map(patterns, fn(_pat, i) {
               g.FnParameter(g.Named("P" <> int.to_string(i)), None)
             })
+          // generate a pattern assignment for each argument of the callback, and
+          // append the remainder of the current body.
           let body =
             list.index_fold(patterns, xs, fn(body, pat, i) {
               let param = g.Variable(span, "P" <> int.to_string(i))
               let assignment =
-                g.Assignment(span, g.Let, pat.pattern, None, param)
+                g.Assignment(span, g.Let, pat.pattern, pat.annotation, param)
               [assignment, ..body]
             })
           let callback = g.Fn(span, params, None, body)
+          // infer the function being called so we can insert the callback correctly
           use #(_, ifun) <- result.try(infer_expression(c, n, fun))
           let field = case ifun {
             Function(labels:, ..) ->
@@ -1947,10 +1997,26 @@ fn infer_body(
               }
             _ -> g.UnlabelledField(callback)
           }
-          let call = g.Call(span, fun, list.append(args, [field]))
-          use #(c, exp) <- result.map(infer_expression(c, n, call))
-          let statement = Expression(exp.typ, exp.location, exp)
-          #(c, [statement])
+          // finally infer the expression as a whole
+          use #(c, call) <- result.map(infer_call(
+            c,
+            n,
+            span,
+            fun,
+            list.append(args, [field]),
+          ))
+          // now re-sugar into a use statement
+          let assert Ok(Fn(body:, ..)) = list.last(call.positional_arguments)
+          let #(patterns, body) = list.split(body, list.length(patterns))
+          let patterns =
+            list.map(patterns, fn(stmt) {
+              let assert Assignment(pattern:, annotation:, ..) = stmt
+              UsePattern(pattern, annotation)
+            })
+            |> list.reverse
+          let statement = Use(call.typ, call.location, patterns, call.function)
+          // TODO: do we really not want to keep the rest of body inline?
+          #(c, [statement, ..body])
         }
       }
   }
@@ -2316,68 +2382,17 @@ fn infer_expression(
       }
     }
     g.Call(span, function, arguments) -> {
-      // infer the type of the function
-      use #(c, fun) <- result.try(infer_expression(c, n, function))
-
-      // get labels from function type
-      let labels = case fun {
-        Function(labels:, ..) -> labels
-        _ -> list.map(arguments, fn(_) { None })
-      }
-
-      // convert glance fields to typed fields (original order)
-      let args =
-        list.map(arguments, fn(arg) {
-          case arg {
-            g.LabelledField(label:, label_location:, item:) ->
-              LabelledField(item, label, label_location)
-            g.ShorthandField(label:, location:) ->
-              ShorthandField(g.Variable(location, label), label, location)
-            g.UnlabelledField(item:) -> UnlabelledField(item)
-          }
-        })
-
-      // build type hints by label/position for Fn arg inference
-      let #(c, fun_typ_resolved) = resolve_type(c, fun.typ)
-      let hinted_args = case fun_typ_resolved {
-        FunctionType(params, _) -> build_arg_hints(args, labels, params)
-        _ -> list.map(args, fn(arg) { #(None, arg) })
-      }
-
-      // infer all args in original (caller) order
-      use #(c, arguments) <- result.try(
-        list.try_fold(hinted_args, #(c, []), fn(acc, hinted_arg) {
-          let #(c, done) = acc
-          let #(hint, field) = hinted_arg
-
-          // give type hint when arg is a fn
-          let result = case field.item {
-            g.Fn(location:, arguments:, return_annotation:, body:) ->
-              infer_fn(c, n, location, arguments, return_annotation, body, hint)
-            _ -> infer_expression(c, n, field.item)
-          }
-          use #(c, inferred_arg) <- result.try(result)
-
-          use c <- result.map(case hint {
-            Some(h) -> unify(c, h, inferred_arg.typ)
-            None -> Ok(c)
-          })
-
-          #(c, [map_field(field, fn(_) { inferred_arg }), ..done])
-        }),
+      use #(c, call) <- result.map(infer_call(c, n, span, function, arguments))
+      #(
+        c,
+        Call(
+          call.typ,
+          call.location,
+          call.function,
+          call.arguments,
+          call.positional_arguments,
+        ),
       )
-      let arguments = list.reverse(arguments)
-
-      // reorder to positional order via label matching
-      use positional_fields <- result.try(match_labels(c, arguments, labels))
-
-      let arg_types = list.map(positional_fields, fn(f) { f.item.typ })
-      let positional_arguments = list.map(positional_fields, fn(f) { f.item })
-
-      // unify the function type with the types of args
-      let #(c, typ) = new_type_var_ref(c)
-      use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
-      #(c, Call(typ, span, fun, arguments, positional_arguments))
     }
     g.TupleIndex(location:, tuple:, index:) -> {
       use #(c, tuple) <- result.try(infer_expression(c, n, tuple))
@@ -2552,68 +2567,97 @@ fn infer_expression(
       Ok(#(c, Case(typ:, location:, subjects:, clauses:)))
     }
     g.BinaryOperator(span, g.Pipe, left, right) -> {
-      // TODO return a not-desugared version
-      case right {
+      // first infer a desugared version of the pipe
+      let #(idx, label, desugared) = case right {
         g.Call(span, fun, args) -> {
-          let call = g.Call(span, fun, [g.UnlabelledField(left), ..args])
-          infer_expression(c, n, call)
+          #(
+            0,
+            None,
+            infer_call(c, n, span, fun, [g.UnlabelledField(left), ..args]),
+          )
         }
         g.FnCapture(span, label, fun, before, after) -> {
           let args = case label {
             Some(label) -> [before, [g.LabelledField(label, span, left)], after]
             None -> [before, [g.UnlabelledField(left)], after]
           }
-          infer_expression(c, n, g.Call(span, fun, list.flatten(args)))
+          #(
+            list.length(before),
+            label,
+            infer_call(c, n, span, fun, list.flatten(args)),
+          )
         }
-        g.Echo(location: span, expression: None, ..) -> {
-          let echo_ = g.Variable(span, "echo_")
-          let pipe = g.BinaryOperator(span, g.Pipe, left, echo_)
-          infer_expression(c, n, pipe)
+        g.Echo(location: span, expression: None, message:) -> {
+          let echo_ =
+            g.Fn(span, [g.FnParameter(g.Named("value"), None)], None, [
+              g.Expression(g.Echo(
+                span,
+                Some(g.Variable(span, "value")),
+                message,
+              )),
+            ])
+          #(0, None, infer_call(c, n, span, echo_, [g.UnlabelledField(left)]))
         }
         _ -> {
-          let call = g.Call(span, right, [g.UnlabelledField(left)])
-          infer_expression(c, n, call)
+          #(0, None, infer_call(c, n, span, right, [g.UnlabelledField(left)]))
         }
       }
+      // then re-sugar it
+      use #(c, desugared) <- result.map(desugared)
+      let InferredCall(
+        typ:,
+        location:,
+        function:,
+        arguments:,
+        positional_arguments: _,
+      ) = desugared
+      let #(before, after) = list.split(arguments, idx)
+      // assert: the left-hand side of the pipe always exists
+      let assert #([left], after) = list.split(after, 1)
+      let left = left.item
+      let right = case function {
+        Fn(_, _, [_], _, [Expression(expression: Echo(message:, ..), ..)]) ->
+          PipeIntoEcho(message)
+        _ -> PipeIntoFnCapture(label, function, before, after)
+      }
+      #(c, Pipe(typ:, location:, left:, right:))
     }
     g.BinaryOperator(location:, name:, left:, right:) -> {
+      let name = map_binop(name)
       let #(c, fun_typ) = case name {
         // Boolean logic
-        g.And | g.Or -> #(c, FunctionType([bool_type, bool_type], bool_type))
+        And | Or -> #(c, FunctionType([bool_type, bool_type], bool_type))
 
         // Equality
-        g.Eq | g.NotEq -> {
+        Eq | NotEq -> {
           let #(c, a) = new_type_var_ref(c)
           #(c, FunctionType([a, a], bool_type))
         }
 
         // Order comparison
-        g.LtInt | g.LtEqInt | g.GtEqInt | g.GtInt -> #(
+        LtInt | LtEqInt | GtEqInt | GtInt -> #(
           c,
           FunctionType([int_type, int_type], bool_type),
         )
 
-        g.LtFloat | g.LtEqFloat | g.GtEqFloat | g.GtFloat -> #(
+        LtFloat | LtEqFloat | GtEqFloat | GtFloat -> #(
           c,
           FunctionType([float_type, float_type], bool_type),
         )
 
-        // Functions
-        g.Pipe -> panic as "pipe should be handeled elsewhere"
-
         // Maths
-        g.AddInt | g.SubInt | g.MultInt | g.DivInt | g.RemainderInt -> #(
+        AddInt | SubInt | MultInt | DivInt | RemainderInt -> #(
           c,
           FunctionType([int_type, int_type], int_type),
         )
 
-        g.AddFloat | g.SubFloat | g.MultFloat | g.DivFloat -> #(
+        AddFloat | SubFloat | MultFloat | DivFloat -> #(
           c,
           FunctionType([float_type, float_type], float_type),
         )
 
         // Strings
-        g.Concatenate -> #(
+        Concatenate -> #(
           c,
           FunctionType([string_type, string_type], string_type),
         )
@@ -2650,6 +2694,115 @@ fn infer_expression(
       })
       Ok(#(c, Echo(typ, location, expression, message)))
     }
+  }
+}
+
+type InferredCall {
+  InferredCall(
+    typ: Type,
+    location: Span,
+    function: Expression,
+    arguments: List(Field(Expression)),
+    positional_arguments: List(Expression),
+  )
+}
+
+fn infer_call(
+  c: Context,
+  n: LocalEnv,
+  span: Span,
+  function: g.Expression,
+  arguments: List(g.Field(g.Expression)),
+) -> Result(#(Context, InferredCall), Error) {
+  // infer the type of the function
+  use #(c, fun) <- result.try(infer_expression(c, n, function))
+
+  // get labels from function type
+  let labels = case fun {
+    Function(labels:, ..) -> labels
+    _ -> list.map(arguments, fn(_) { None })
+  }
+
+  // convert glance fields to typed fields (original order)
+  let args =
+    list.map(arguments, fn(arg) {
+      case arg {
+        g.LabelledField(label:, label_location:, item:) ->
+          LabelledField(item, label, label_location)
+        g.ShorthandField(label:, location:) ->
+          ShorthandField(g.Variable(location, label), label, location)
+        g.UnlabelledField(item:) -> UnlabelledField(item)
+      }
+    })
+
+  // build type hints by label/position for Fn arg inference
+  let #(c, fun_typ_resolved) = resolve_type(c, fun.typ)
+  let hinted_args = case fun_typ_resolved {
+    FunctionType(params, _) -> build_arg_hints(args, labels, params)
+    _ -> list.map(args, fn(arg) { #(None, arg) })
+  }
+
+  // infer all args in original (caller) order
+  use #(c, arguments) <- result.try(
+    list.try_fold(hinted_args, #(c, []), fn(acc, hinted_arg) {
+      let #(c, done) = acc
+      let #(hint, field) = hinted_arg
+
+      // give type hint when arg is a fn
+      let result = case field.item {
+        g.Fn(location:, arguments:, return_annotation:, body:) ->
+          infer_fn(c, n, location, arguments, return_annotation, body, hint)
+        _ -> infer_expression(c, n, field.item)
+      }
+      use #(c, inferred_arg) <- result.try(result)
+
+      use c <- result.map(case hint {
+        Some(h) -> unify(c, h, inferred_arg.typ)
+        None -> Ok(c)
+      })
+
+      #(c, [map_field(field, fn(_) { inferred_arg }), ..done])
+    }),
+  )
+  let arguments = list.reverse(arguments)
+
+  // reorder to positional order via label matching
+  use positional_fields <- result.try(match_labels(c, arguments, labels))
+
+  let arg_types = list.map(positional_fields, fn(f) { f.item.typ })
+  let positional_arguments = list.map(positional_fields, fn(f) { f.item })
+
+  // unify the function type with the types of args
+  let #(c, typ) = new_type_var_ref(c)
+  use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
+  #(c, InferredCall(typ, span, fun, arguments, positional_arguments))
+}
+
+fn map_binop(name: g.BinaryOperator) -> BinaryOperator {
+  case name {
+    g.And -> And
+    g.Or -> Or
+    g.Eq -> Eq
+    g.NotEq -> NotEq
+    g.LtInt -> LtInt
+    g.LtEqInt -> LtEqInt
+    g.LtFloat -> LtFloat
+    g.LtEqFloat -> LtEqFloat
+    g.GtEqInt -> GtEqInt
+    g.GtInt -> GtInt
+    g.GtEqFloat -> GtEqFloat
+    g.GtFloat -> GtFloat
+    g.Pipe -> panic as "pipe should be handeled elsewhere"
+    g.AddInt -> AddInt
+    g.AddFloat -> AddFloat
+    g.SubInt -> SubInt
+    g.SubFloat -> SubFloat
+    g.MultInt -> MultInt
+    g.MultFloat -> MultFloat
+    g.DivInt -> DivInt
+    g.DivFloat -> DivFloat
+    g.RemainderInt -> RemainderInt
+    g.Concatenate -> Concatenate
   }
 }
 
@@ -3282,6 +3435,39 @@ fn substitute_expression(
         name:,
         left: substitute_expression(c, rename, left),
         right: substitute_expression(c, rename, right),
+      )
+    Pipe(typ:, location:, left:, right:) ->
+      Pipe(
+        typ: substitute_type(c, rename, typ),
+        location:,
+        left: substitute_expression(c, rename, left),
+        right: substitute_pipe_into(c, rename, right),
+      )
+  }
+}
+
+fn substitute_pipe_into(
+  c: Context,
+  rename: Dict(TypeVarId, TypeVarId),
+  right: PipeInto,
+) -> PipeInto {
+  case right {
+    PipeIntoEcho(message:) ->
+      PipeIntoEcho(
+        message: option.map(message, substitute_expression(c, rename, _)),
+      )
+    PipeIntoFnCapture(label:, function:, arguments_before:, arguments_after:) ->
+      PipeIntoFnCapture(
+        label:,
+        function: substitute_expression(c, rename, function),
+        arguments_before: list.map(
+          arguments_before,
+          map_field(_, substitute_expression(c, rename, _)),
+        ),
+        arguments_after: list.map(
+          arguments_after,
+          map_field(_, substitute_expression(c, rename, _)),
+        ),
       )
   }
 }

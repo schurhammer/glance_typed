@@ -1,0 +1,82 @@
+---
+version: 1.5.4
+title: use patterns test
+file: ./test/glance_typed_test.gleam
+test_name: use_patterns_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: use
+    type: "gleam.Int"
+    patterns:
+    - pattern:
+        kind: tuple_pattern
+        type: "#(gleam.Int, gleam.Int)"
+        elements:
+        - kind: discard_pattern
+          type: "gleam.Int"
+        - kind: variable_pattern
+          type: "gleam.Int"
+          name: square
+    - pattern:
+        kind: discard_pattern
+        type: "gleam.String"
+    function:
+      kind: function
+      type: "fn(gleam.Int, fn(#(gleam.Int, gleam.Int), gleam.String) -> gleam.Int) -> gleam.Int"
+      module: test
+      name: with_square
+  - kind: local_variable
+    type: "gleam.Int"
+    name: square
+- name: with_square
+  type: "(0) fn(gleam.Int, fn(#(gleam.Int, gleam.Int), gleam.String) -> 0) -> 0"
+  publicity: private
+  parameters:
+  - type: "gleam.Int"
+    name: n
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "fn(#(gleam.Int, gleam.Int), gleam.String) -> 0"
+    name: callback
+    annotation:
+      annotation: "fn(#(Int, Int), String) -> a"
+      type: "fn(#(gleam.Int, gleam.Int), gleam.String) -> 0"
+  return:
+    annotation: a
+    type: "0"
+  body:
+  - kind: call
+    type: "0"
+    function:
+      kind: local_variable
+      type: "fn(#(gleam.Int, gleam.Int), gleam.String) -> 0"
+      name: callback
+    positional_arguments:
+    - kind: tuple
+      type: "#(gleam.Int, gleam.Int)"
+      elements:
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "2"
+      - kind: binary_operator
+        type: "gleam.Int"
+        name: "*"
+        left:
+          kind: local_variable
+          type: "gleam.Int"
+          name: n
+        right:
+          kind: local_variable
+          type: "gleam.Int"
+          name: n
+    - kind: string_literal
+      type: "gleam.String"
+      value: square
+

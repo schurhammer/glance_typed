@@ -14,17 +14,19 @@ functions:
     annotation: Int
     type: "gleam.Int"
   body:
-  - kind: call
+  - kind: pipe
     type: "gleam.Int"
-    function:
-      kind: function
-      type: "fn(gleam.Int) -> gleam.Int"
-      module: test
-      name: double
-    positional_arguments:
-    - kind: int_literal
+    left:
+      kind: int_literal
       type: "gleam.Int"
       value: "5"
+    right:
+      kind: fn_capture
+      function:
+        kind: function
+        type: "fn(gleam.Int) -> gleam.Int"
+        module: test
+        name: double
 - name: double
   type: "() fn(gleam.Int) -> gleam.Int"
   publicity: public

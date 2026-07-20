@@ -1,5 +1,4 @@
 import cymbal
-import glance
 import glance_typed as typed
 
 import gleam/int
@@ -418,6 +417,57 @@ fn expression_to_yaml(expression: typed.Expression) -> cymbal.Yaml {
         #("left", expression_to_yaml(left)),
         #("right", expression_to_yaml(right)),
       ])
+    typed.Pipe(typ:, left:, right:, ..) -> {
+      typed_node("pipe", typ, [
+        #("left", expression_to_yaml(left)),
+        #("right", pipe_target_to_yaml(right)),
+      ])
+    }
+  }
+}
+
+fn pipe_target_to_yaml(into: typed.PipeInto) -> cymbal.Yaml {
+  case into {
+    typed.PipeIntoEcho(message:) ->
+      yaml_block(
+        [
+          Some(#("kind", cymbal.string("echo"))),
+          option.map(message, fn(message) {
+            #("message", expression_to_yaml(message))
+          }),
+        ]
+        |> option.values,
+      )
+    typed.PipeIntoFnCapture(
+      label:,
+      function:,
+      arguments_before:,
+      arguments_after:,
+    ) ->
+      yaml_block(
+        [
+          Some(#("kind", cymbal.string("fn_capture"))),
+          option.map(label, fn(label) { #("label", cymbal.string(label)) }),
+          Some(#("function", expression_to_yaml(function))),
+          Some(#(
+            "arguments_before",
+            yaml_list(arguments_before, field_to_yaml(
+              _,
+              "value",
+              expression_to_yaml,
+            )),
+          )),
+          Some(#(
+            "arguments_after",
+            yaml_list(arguments_after, field_to_yaml(
+              _,
+              "value",
+              expression_to_yaml,
+            )),
+          )),
+        ]
+        |> option.values,
+      )
   }
 }
 
@@ -441,31 +491,30 @@ fn field_to_yaml(
   )
 }
 
-fn binary_operator_to_string(operator: glance.BinaryOperator) -> String {
+fn binary_operator_to_string(operator: typed.BinaryOperator) -> String {
   case operator {
-    glance.And -> "&&"
-    glance.Or -> "||"
-    glance.Eq -> "=="
-    glance.NotEq -> "!="
-    glance.LtInt -> "<"
-    glance.LtEqInt -> "<="
-    glance.LtFloat -> "<."
-    glance.LtEqFloat -> "<=."
-    glance.GtEqInt -> ">="
-    glance.GtInt -> ">"
-    glance.GtEqFloat -> ">=."
-    glance.GtFloat -> ">."
-    glance.Pipe -> "|>"
-    glance.AddInt -> "+"
-    glance.AddFloat -> "+."
-    glance.SubInt -> "-"
-    glance.SubFloat -> "-."
-    glance.MultInt -> "*"
-    glance.MultFloat -> "*."
-    glance.DivInt -> "/"
-    glance.DivFloat -> "/."
-    glance.RemainderInt -> "%"
-    glance.Concatenate -> "<>"
+    typed.And -> "&&"
+    typed.Or -> "||"
+    typed.Eq -> "=="
+    typed.NotEq -> "!="
+    typed.LtInt -> "<"
+    typed.LtEqInt -> "<="
+    typed.LtFloat -> "<."
+    typed.LtEqFloat -> "<=."
+    typed.GtEqInt -> ">="
+    typed.GtInt -> ">"
+    typed.GtEqFloat -> ">=."
+    typed.GtFloat -> ">."
+    typed.AddInt -> "+"
+    typed.AddFloat -> "+."
+    typed.SubInt -> "-"
+    typed.SubFloat -> "-."
+    typed.MultInt -> "*"
+    typed.MultFloat -> "*."
+    typed.DivInt -> "/"
+    typed.DivFloat -> "/."
+    typed.RemainderInt -> "%"
+    typed.Concatenate -> "<>"
   }
 }
 

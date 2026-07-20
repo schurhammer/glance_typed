@@ -11,34 +11,21 @@ functions:
   type: "() fn() -> gleam.Int"
   publicity: public
   body:
-  - kind: call
+  - kind: use
     type: "gleam.Int"
+    patterns:
+    - pattern:
+        kind: variable_pattern
+        type: "gleam.Int"
+        name: x
     function:
       kind: function
       type: "fn(fn(gleam.Int) -> gleam.Int) -> gleam.Int"
       module: test
       name: with_value
-    positional_arguments:
-    - kind: fn
-      type: "fn(gleam.Int) -> gleam.Int"
-      parameters:
-      - type: "gleam.Int"
-        name: P0
-      body:
-      - kind: assignment
-        type: "gleam.Int"
-        assignment_kind: let
-        pattern:
-          kind: variable_pattern
-          type: "gleam.Int"
-          name: x
-        value:
-          kind: local_variable
-          type: "gleam.Int"
-          name: P0
-      - kind: local_variable
-        type: "gleam.Int"
-        name: x
+  - kind: local_variable
+    type: "gleam.Int"
+    name: x
 - name: with_value
   type: "(0) fn(fn(gleam.Int) -> 0) -> 0"
   publicity: public

@@ -11,20 +11,25 @@ functions:
   type: "(0) fn() -> 0"
   publicity: public
   body:
-  - kind: call
+  - kind: pipe
     type: "0"
-    function:
-      kind: function
-      type: "fn(gleam.String, gleam.Int) -> 0"
-      module: test
-      name: write
-    positional_arguments:
-    - kind: string_literal
-      type: "gleam.String"
-      value: foo
-    - kind: int_literal
+    left:
+      kind: int_literal
       type: "gleam.Int"
       value: "123"
+    right:
+      kind: fn_capture
+      function:
+        kind: function
+        type: "fn(gleam.String, gleam.Int) -> 0"
+        module: test
+        name: write
+      arguments_after:
+      - label: to
+        value:
+          kind: string_literal
+          type: "gleam.String"
+          value: foo
 - name: write
   type: "(0, 1, 2) fn(0, 1) -> 2"
   publicity: public

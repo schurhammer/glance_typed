@@ -1,0 +1,90 @@
+---
+version: 1.5.4
+title: pipe with args test
+file: ./test/glance_typed_test.gleam
+test_name: pipe_with_args_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: pipe
+    type: "gleam.Int"
+    left:
+      kind: pipe
+      type: "gleam.Int"
+      left:
+        kind: pipe
+        type: "gleam.Int"
+        left:
+          kind: pipe
+          type: "gleam.Int"
+          left:
+            kind: int_literal
+            type: "gleam.Int"
+            value: "5"
+          right:
+            kind: fn_capture
+            function:
+              kind: function
+              type: "fn(gleam.Int, gleam.Int) -> gleam.Int"
+              module: test
+              name: sub
+            arguments_after:
+            - value:
+                kind: int_literal
+                type: "gleam.Int"
+                value: "3"
+        right:
+          kind: fn_capture
+          function:
+            kind: function
+            type: "fn(gleam.Int, gleam.Int) -> gleam.Int"
+            module: test
+            name: sub
+          arguments_before:
+          - value:
+              kind: int_literal
+              type: "gleam.Int"
+              value: "8"
+      right:
+        kind: fn_capture
+        function:
+          kind: function
+          type: "fn(gleam.Int, gleam.Int) -> gleam.Int"
+          module: test
+          name: sub
+        arguments_after:
+        - label: minuend
+          value:
+            kind: int_literal
+            type: "gleam.Int"
+            value: "8"
+    right:
+      kind: echo
+- name: sub
+  type: "() fn(gleam.Int, gleam.Int) -> gleam.Int"
+  publicity: private
+  parameters:
+  - type: "gleam.Int"
+    label: minuend
+    name: m
+  - type: "gleam.Int"
+    label: subtrahend
+    name: s
+  body:
+  - kind: binary_operator
+    type: "gleam.Int"
+    name: -
+    left:
+      kind: local_variable
+      type: "gleam.Int"
+      name: m
+    right:
+      kind: local_variable
+      type: "gleam.Int"
+      name: s
+
