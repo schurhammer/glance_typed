@@ -1,0 +1,189 @@
+---
+version: 1.5.4
+title: use statement tail type test
+---
+---
+name: test
+functions:
+- name: variants
+  type: "() fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+  publicity: public
+  parameters:
+  - type: "gleam.Int"
+    name: ct
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "gleam.Int"
+    name: tokens
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  return:
+    annotation: "Result(#(Int, Int, Int), Nil)"
+    type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+  body:
+  - kind: use
+    type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+    patterns:
+    - pattern:
+        kind: variable_pattern
+        type: "gleam.Int"
+        name: ct
+    - pattern:
+        kind: variable_pattern
+        type: "gleam.Int"
+        name: tokens
+    function:
+      kind: function
+      type: "fn(gleam.Int, gleam.Int, gleam.Int, fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+      module: test
+      name: until
+    arguments:
+    - value:
+        kind: local_variable
+        type: "gleam.Int"
+        name: ct
+    - value:
+        kind: local_variable
+        type: "gleam.Int"
+        name: tokens
+    - value:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "0"
+    positional_arguments:
+    - kind: local_variable
+      type: "gleam.Int"
+      name: ct
+    - kind: local_variable
+      type: "gleam.Int"
+      name: tokens
+    - kind: int_literal
+      type: "gleam.Int"
+      value: "0"
+    body:
+    - kind: call
+      type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+      function:
+        kind: function
+        type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+        module: gleam
+        name: Ok
+      positional_arguments:
+      - kind: tuple
+        type: "#(gleam.Int, gleam.Int)"
+        elements:
+        - kind: local_variable
+          type: "gleam.Int"
+          name: ct
+        - kind: local_variable
+          type: "gleam.Int"
+          name: tokens
+- name: until
+  type: "() fn(gleam.Int, gleam.Int, gleam.Int, fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+  publicity: private
+  parameters:
+  - type: "gleam.Int"
+    name: a
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "gleam.Int"
+    name: b
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "gleam.Int"
+    name: c
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+    name: callback
+    annotation:
+      annotation: "fn(Int, Int) -> Result(#(Int, Int), Nil)"
+      type: "fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+  return:
+    annotation: "Result(#(Int, Int, Int), Nil)"
+    type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+  body:
+  - kind: case
+    type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+    subjects:
+    - kind: call
+      type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+      function:
+        kind: local_variable
+        type: "fn(gleam.Int, gleam.Int) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+        name: callback
+      positional_arguments:
+      - kind: local_variable
+        type: "gleam.Int"
+        name: a
+      - kind: local_variable
+        type: "gleam.Int"
+        name: b
+    clauses:
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+          constructor: Ok
+          with_spread: false
+          positional_arguments:
+          - kind: tuple_pattern
+            type: "#(gleam.Int, gleam.Int)"
+            elements:
+            - kind: variable_pattern
+              type: "gleam.Int"
+              name: x
+            - kind: variable_pattern
+              type: "gleam.Int"
+              name: y
+          resolved_module: gleam
+      body:
+        kind: call
+        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+        function:
+          kind: function
+          type: "fn(#(gleam.Int, gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+          module: gleam
+          name: Ok
+        positional_arguments:
+        - kind: tuple
+          type: "#(gleam.Int, gleam.Int, gleam.Int)"
+          elements:
+          - kind: local_variable
+            type: "gleam.Int"
+            name: x
+          - kind: local_variable
+            type: "gleam.Int"
+            name: y
+          - kind: local_variable
+            type: "gleam.Int"
+            name: c
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+          constructor: Error
+          with_spread: false
+          positional_arguments:
+          - kind: variable_pattern
+            type: "gleam.Nil"
+            name: e
+          resolved_module: gleam
+      body:
+        kind: call
+        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+        function:
+          kind: function
+          type: "fn(gleam.Nil) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+          module: gleam
+          name: Error
+        positional_arguments:
+        - kind: local_variable
+          type: "gleam.Nil"
+          name: e
+

@@ -1,8 +1,6 @@
 ---
 version: 1.5.4
 title: use patterns test
-file: ./test/glance_typed_test.gleam
-test_name: use_patterns_test
 ---
 ---
 name: test
@@ -31,9 +29,19 @@ functions:
       type: "fn(gleam.Int, fn(#(gleam.Int, gleam.Int), gleam.String) -> gleam.Int) -> gleam.Int"
       module: test
       name: with_square
-  - kind: local_variable
-    type: "gleam.Int"
-    name: square
+    arguments:
+    - value:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "3"
+    positional_arguments:
+    - kind: int_literal
+      type: "gleam.Int"
+      value: "3"
+    body:
+    - kind: local_variable
+      type: "gleam.Int"
+      name: square
 - name: with_square
   type: "(0) fn(gleam.Int, fn(#(gleam.Int, gleam.Int), gleam.String) -> 0) -> 0"
   publicity: private

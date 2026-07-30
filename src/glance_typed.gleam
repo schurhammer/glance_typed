@@ -106,6 +106,9 @@ pub type Statement {
     location: Span,
     patterns: List(UsePattern),
     function: Expression,
+    arguments: List(Field(Expression)),
+    positional_arguments: List(Expression),
+    body: List(Statement),
   )
   Assignment(
     typ: Type,
@@ -2006,7 +2009,10 @@ fn infer_body(
             list.append(args, [field]),
           ))
           // now re-sugar into a use statement
-          let assert Ok(Fn(body:, ..)) = list.last(call.positional_arguments)
+          let assert Ok(#(arguments, _)) = split_last(call.arguments)
+          let assert Ok(#(positional_arguments, callback)) =
+            split_last(call.positional_arguments)
+          let assert Fn(body:, ..) = callback
           let #(patterns, body) = list.split(body, list.length(patterns))
           let patterns =
             list.map(patterns, fn(stmt) {
@@ -2014,9 +2020,17 @@ fn infer_body(
               UsePattern(pattern, annotation)
             })
             |> list.reverse
-          let statement = Use(call.typ, call.location, patterns, call.function)
-          // TODO: do we really not want to keep the rest of body inline?
-          #(c, [statement, ..body])
+          let statement =
+            Use(
+              call.typ,
+              call.location,
+              patterns,
+              call.function,
+              arguments,
+              positional_arguments,
+              body,
+            )
+          #(c, [statement])
         }
       }
   }
@@ -3182,12 +3196,29 @@ fn substitute_statement(
   statement: Statement,
 ) -> Statement {
   case statement {
-    Use(typ:, location:, patterns:, function:) ->
+    Use(
+      typ:,
+      location:,
+      patterns:,
+      function:,
+      arguments:,
+      positional_arguments:,
+      body:,
+    ) ->
       Use(
         typ: substitute_type(c, rename, typ),
         location:,
         patterns: list.map(patterns, substitute_use_pattern(c, rename, _)),
         function: substitute_expression(c, rename, function),
+        arguments: list.map(
+          arguments,
+          map_field(_, substitute_expression(c, rename, _)),
+        ),
+        positional_arguments: list.map(
+          positional_arguments,
+          substitute_expression(c, rename, _),
+        ),
+        body: list.map(body, substitute_statement(c, rename, _)),
       )
     Assignment(typ:, location:, kind:, pattern:, annotation:, value:) ->
       Assignment(
@@ -3636,6 +3667,13 @@ fn substitute_annotation(
       VariableAnno(typ: substitute_type(c, rename, typ), location:, name:)
     HoleAnno(typ:, location:, name:) ->
       HoleAnno(substitute_type(c, rename, typ), location:, name:)
+  }
+}
+
+fn split_last(items: List(a)) -> Result(#(List(a), a), Nil) {
+  case list.reverse(items) {
+    [last, ..rest] -> Ok(#(list.reverse(rest), last))
+    [] -> Error(Nil)
   }
 }
 

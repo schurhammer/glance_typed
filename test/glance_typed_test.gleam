@@ -60,6 +60,19 @@ fn infer_error_with_prelude(source: String) -> typed.Error {
   err
 }
 
+fn result_dependencies() -> dict.Dict(String, typed.ModuleInterface) {
+  let prelude = typed.interface(typed.prelude_module())
+  let result_interface =
+    infer_interface(
+      prelude_deps(),
+      "
+      pub fn map(result: Result(a, e), f: fn(a) -> b) -> Result(b, e) { panic }
+      ",
+      "gleam/result",
+    )
+  dict.from_list([#("gleam", prelude), #("gleam/result", result_interface)])
+}
+
 fn option_dependencies() -> dict.Dict(String, typed.ModuleInterface) {
   let prelude = typed.interface(typed.prelude_module())
   let option_interface =
@@ -808,6 +821,47 @@ pub fn use_patterns_test() {
     ",
   )
   |> birdie.snap(title: "use patterns test")
+}
+
+pub fn use_statement_tail_type_test() {
+  infer_yaml_with_prelude(
+    "
+    fn until(
+      a: Int,
+      b: Int,
+      c: Int,
+      callback: fn(Int, Int) -> Result(#(Int, Int), Nil),
+    ) -> Result(#(Int, Int, Int), Nil) {
+      case callback(a, b) {
+        Ok(#(x, y)) -> Ok(#(x, y, c))
+        Error(e) -> Error(e)
+      }
+    }
+
+    pub fn variants(ct: Int, tokens: Int) -> Result(#(Int, Int, Int), Nil) {
+      use ct, tokens <- until(ct, tokens, 0)
+      Ok(#(ct, tokens))
+    }
+    ",
+  )
+  |> birdie.snap(title: "use statement tail type test")
+}
+
+pub fn use_result_map_test() {
+  infer_with(
+    result_dependencies(),
+    "
+    import gleam/result
+
+    pub fn example(r: Result(Int, String)) -> Result(Int, String) {
+      use x <- result.map(r)
+      x + 1
+    }
+    ",
+    "example",
+  )
+  |> glance_typed_yaml.module_to_string
+  |> birdie.snap(title: "use result map test")
 }
 
 pub fn pattern_assignment_test() {

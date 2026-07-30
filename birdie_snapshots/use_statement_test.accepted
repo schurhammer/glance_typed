@@ -1,8 +1,6 @@
 ---
 version: 1.5.4
 title: use statement test
-file: ./test/glance_typed_test.gleam
-test_name: use_statement_test
 ---
 ---
 name: test
@@ -23,9 +21,10 @@ functions:
       type: "fn(fn(gleam.Int) -> gleam.Int) -> gleam.Int"
       module: test
       name: with_value
-  - kind: local_variable
-    type: "gleam.Int"
-    name: x
+    body:
+    - kind: local_variable
+      type: "gleam.Int"
+      name: x
 - name: with_value
   type: "(0) fn(fn(gleam.Int) -> 0) -> 0"
   publicity: public

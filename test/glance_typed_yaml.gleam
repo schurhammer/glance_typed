@@ -168,10 +168,27 @@ fn typed_node(
 
 fn statement_to_yaml(statement: typed.Statement) -> cymbal.Yaml {
   case statement {
-    typed.Use(typ:, patterns:, function:, ..) ->
+    typed.Use(
+      typ:,
+      patterns:,
+      function:,
+      arguments:,
+      positional_arguments:,
+      body:,
+      ..,
+    ) ->
       typed_node("use", typ, [
         #("patterns", yaml_list(patterns, use_pattern_to_yaml)),
         #("function", expression_to_yaml(function)),
+        #(
+          "arguments",
+          yaml_list(arguments, field_to_yaml(_, "value", expression_to_yaml)),
+        ),
+        #(
+          "positional_arguments",
+          yaml_list(positional_arguments, expression_to_yaml),
+        ),
+        #("body", yaml_list(body, statement_to_yaml)),
       ])
     typed.Assignment(typ:, kind:, pattern:, annotation:, value:, ..) ->
       typed_node(
