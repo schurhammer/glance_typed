@@ -4,6 +4,7 @@ import glance_typed as typed
 import glance_typed_yaml
 import gleam/dict
 import gleam/list
+import gleam/option
 import gleeunit
 
 pub fn main() {
@@ -1283,4 +1284,168 @@ pub fn use_imported_constant_test() {
   )
   |> glance_typed_yaml.module_to_string
   |> birdie.snap(title: "use imported constant test")
+}
+
+pub fn let_assert_message_is_substituted_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Box { Box(Int) }
+      fn label(x: a) -> String { \"l\" }
+      pub fn get(r: Result(Int, Nil), w: Box) -> Int {
+        let assert Ok(v) = r as label(w)
+        v
+      }
+      ",
+    )
+  let assert Ok(get) =
+    list.find(module.functions, fn(d) { d.definition.name == "get" })
+  let vars =
+    list.flat_map(get.definition.body, fn(stmt) {
+      case stmt {
+        typed.Assignment(kind: typed.LetAssert(option.Some(msg)), ..) ->
+          collect_type_variables_in_expression(msg)
+        _ -> []
+      }
+    })
+  let assert [] = vars
+}
+
+fn collect_type_variables(typ: typed.Type) -> List(typed.TypeVarId) {
+  case typ {
+    typed.VariableType(ref) -> [ref]
+    typed.NamedType(parameters: ps, ..) ->
+      list.flat_map(ps, collect_type_variables)
+    typed.TupleType(elements: es) -> list.flat_map(es, collect_type_variables)
+    typed.FunctionType(parameters: ps, return: r) ->
+      list.append(
+        list.flat_map(ps, collect_type_variables),
+        collect_type_variables(r),
+      )
+  }
+}
+
+fn collect_type_variables_in_expression(
+  expr: typed.Expression,
+) -> List(typed.TypeVarId) {
+  let here = collect_type_variables(expr_type(expr))
+  let nested = case expr {
+    typed.Call(function: f, positional_arguments: args, ..) ->
+      list.append(
+        collect_type_variables_in_expression(f),
+        list.flat_map(args, collect_type_variables_in_expression),
+      )
+    _ -> []
+  }
+  list.append(here, nested)
+}
+
+fn expr_type(expr: typed.Expression) -> typed.Type {
+  case expr {
+    typed.LocalVariable(typ:, ..) -> typ
+    typed.Function(typ:, ..) -> typ
+    typed.Call(typ:, ..) -> typ
+    typed.String(typ:, ..) -> typ
+    typed.Int(typ:, ..) -> typ
+    _ -> typed.nil_type
+  }
+}
+
+pub fn use_callback_not_last_parameter_test() {
+  infer_yaml_with_prelude(
+    "
+    fn apply(callback f: fn(Int) -> Int, amount b: Int) -> Int {
+      f(b)
+    }
+
+    pub fn main() -> Int {
+      use x <- apply(amount: 1)
+      x + 1
+    }
+    ",
+  )
+  |> birdie.snap(title: "use callback not last parameter test")
+}
+
+pub fn use_labelled_callback_parameter_test() {
+  infer_yaml_with_prelude(
+    "
+    fn each(over n: Int, with f: fn(Int) -> Int) -> Int {
+      f(n)
+    }
+
+    pub fn main() -> Int {
+      use x <- each(over: 1)
+      x + 1
+    }
+    ",
+  )
+  |> birdie.snap(title: "use labelled callback parameter test")
+}
+
+fn desugar_first_use(module: typed.Module, name: String) -> String {
+  let assert Ok(function) =
+    list.find(module.functions, fn(d) { d.definition.name == name })
+  let assert [use_statement, ..] = function.definition.body
+  let assert Ok(call) = typed.desugar_use(use_statement)
+  glance_typed_yaml.expression_to_string(call)
+}
+
+pub fn desugar_use_test() {
+  infer_with_prelude(
+    "
+    fn with_value(f: fn(Int) -> Int) -> Int {
+      f(1)
+    }
+
+    pub fn main() -> Int {
+      use x <- with_value()
+      x + 1
+    }
+    ",
+  )
+  |> desugar_first_use("main")
+  |> birdie.snap(title: "desugar use test")
+}
+
+pub fn desugar_use_callback_not_last_parameter_test() {
+  infer_with_prelude(
+    "
+    fn apply(callback f: fn(Int) -> Int, amount b: Int) -> Int {
+      f(b)
+    }
+
+    pub fn main() -> Int {
+      use x <- apply(amount: 1)
+      x + 1
+    }
+    ",
+  )
+  |> desugar_first_use("main")
+  |> birdie.snap(title: "desugar use callback not last parameter test")
+}
+
+pub fn desugar_use_patterns_test() {
+  infer_with_prelude(
+    "
+    fn with_square(x: Int, f: fn(#(Int, Int), String) -> Int) -> Int {
+      f(#(x, x), \"s\")
+    }
+
+    pub fn main() -> Int {
+      use #(a, b), s <- with_square(3)
+      a + b
+    }
+    ",
+  )
+  |> desugar_first_use("main")
+  |> birdie.snap(title: "desugar use patterns test")
+}
+
+pub fn desugar_use_rejects_other_statements_test() {
+  let module = infer_with_prelude("pub fn main() -> Int { let x = 1 x }")
+  let assert Ok(function) =
+    list.find(module.functions, fn(d) { d.definition.name == "main" })
+  let assert [statement, ..] = function.definition.body
+  let assert Error(Nil) = typed.desugar_use(statement)
 }

@@ -1,0 +1,75 @@
+---
+version: 1.5.4
+title: use labelled callback parameter test
+---
+---
+name: test
+functions:
+- name: main
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  return:
+    annotation: Int
+    type: "gleam.Int"
+  body:
+  - kind: use
+    type: "gleam.Int"
+    patterns:
+    - pattern:
+        kind: variable_pattern
+        type: "gleam.Int"
+        name: x
+    function:
+      kind: function
+      type: "fn(gleam.Int, fn(gleam.Int) -> gleam.Int) -> gleam.Int"
+      module: test
+      name: each
+    arguments:
+    - label: over
+      value:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+    body:
+    - kind: binary_operator
+      type: "gleam.Int"
+      name: "+"
+      left:
+        kind: local_variable
+        type: "gleam.Int"
+        name: x
+      right:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+- name: each
+  type: "() fn(gleam.Int, fn(gleam.Int) -> gleam.Int) -> gleam.Int"
+  publicity: private
+  parameters:
+  - type: "gleam.Int"
+    label: over
+    name: n
+    annotation:
+      annotation: Int
+      type: "gleam.Int"
+  - type: "fn(gleam.Int) -> gleam.Int"
+    label: with
+    name: f
+    annotation:
+      annotation: "fn(Int) -> Int"
+      type: "fn(gleam.Int) -> gleam.Int"
+  return:
+    annotation: Int
+    type: "gleam.Int"
+  body:
+  - kind: call
+    type: "gleam.Int"
+    function:
+      kind: local_variable
+      type: "fn(gleam.Int) -> gleam.Int"
+      name: f
+    positional_arguments:
+    - kind: local_variable
+      type: "gleam.Int"
+      name: n
+

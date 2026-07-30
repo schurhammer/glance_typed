@@ -107,7 +107,6 @@ pub type Statement {
     patterns: List(UsePattern),
     function: Expression,
     arguments: List(Field(Expression)),
-    positional_arguments: List(Expression),
     body: List(Statement),
   )
   Assignment(
@@ -883,6 +882,74 @@ fn new_context(module_name: String) -> Context {
     type_env: dict.new(),
     value_env: dict.new(),
   )
+}
+
+/// Desugar a `use` statement into a regular function call.
+/// Returns `Error(Nil)` if the statement is not `Use`,
+/// or if the arguments could not be matched to the function.
+pub fn desugar_use(statement: Statement) -> Result(Expression, Nil) {
+  case statement {
+    Use(typ:, location:, patterns:, function:, arguments:, body:) -> {
+      let arguments =
+        list.append(arguments, [
+          UnlabelledField(use_callback(location, patterns, body)),
+        ])
+      let labels = case function {
+        Function(labels:, ..) -> labels
+        _ -> list.map(arguments, fn(_) { None })
+      }
+      use positional <- result.map(
+        match_labels_optional(arguments, labels)
+        |> list.try_map(option.to_result(_, Nil)),
+      )
+      Call(
+        typ,
+        location,
+        function,
+        arguments,
+        list.map(positional, fn(field) { field.item }),
+      )
+    }
+    _ -> Error(Nil)
+  }
+}
+
+fn use_callback(
+  location: Span,
+  patterns: List(UsePattern),
+  body: List(Statement),
+) -> Expression {
+  let parameters =
+    list.index_map(patterns, fn(pattern, i) {
+      FnParameter(pattern.pattern.typ, Named(use_parameter_name(i)), None)
+    })
+  // one assignment per pattern, binding it to the parameter, in source order
+  let assignments =
+    list.index_map(patterns, fn(pattern, i) {
+      let typ = pattern.pattern.typ
+      let variable = LocalVariable(typ, location, use_parameter_name(i))
+      Assignment(
+        typ,
+        location,
+        Let,
+        pattern.pattern,
+        pattern.annotation,
+        variable,
+      )
+    })
+  let body = list.append(assignments, body)
+  // the callback's return type is recovered from the body's tail, since there
+  // is nothing left to infer it from at this point
+  let return = case list.last(body) {
+    Ok(statement) -> statement.typ
+    Error(_) -> nil_type
+  }
+  let typ = FunctionType(list.map(parameters, fn(p) { p.typ }), return)
+  Fn(typ, location, parameters, None, body)
+}
+
+fn use_parameter_name(index: Int) -> String {
+  "P" <> int.to_string(index)
 }
 
 /// Returns a human-readable string description of the error.
@@ -1978,48 +2045,31 @@ fn infer_body(
           }
           let params =
             list.index_map(patterns, fn(_pat, i) {
-              g.FnParameter(g.Named("P" <> int.to_string(i)), None)
+              g.FnParameter(g.Named(use_parameter_name(i)), None)
             })
-          // generate a pattern assignment for each argument of the callback, and
-          // append the remainder of the current body.
-          let body =
-            list.index_fold(patterns, xs, fn(body, pat, i) {
-              let param = g.Variable(span, "P" <> int.to_string(i))
-              let assignment =
-                g.Assignment(span, g.Let, pat.pattern, pat.annotation, param)
-              [assignment, ..body]
+          // one assignment per pattern, binding it to the parameter, in source
+          // order, followed by the remainder of the current body.
+          let assignments =
+            list.index_map(patterns, fn(pat, i) {
+              let param = g.Variable(span, use_parameter_name(i))
+              g.Assignment(span, g.Let, pat.pattern, pat.annotation, param)
             })
+          let body = list.append(assignments, xs)
           let callback = g.Fn(span, params, None, body)
-          // infer the function being called so we can insert the callback correctly
-          use #(_, ifun) <- result.try(infer_expression(c, n, fun))
-          let field = case ifun {
-            Function(labels:, ..) ->
-              case list.last(labels) {
-                Ok(Some(label)) -> g.LabelledField(label, span, callback)
-                _ -> g.UnlabelledField(callback)
-              }
-            _ -> g.UnlabelledField(callback)
-          }
-          // finally infer the expression as a whole
-          use #(c, call) <- result.map(infer_call(
-            c,
-            n,
-            span,
-            fun,
-            list.append(args, [field]),
-          ))
-          // now re-sugar into a use statement
-          let assert Ok(#(arguments, _)) = split_last(call.arguments)
-          let assert Ok(#(positional_arguments, callback)) =
-            split_last(call.positional_arguments)
-          let assert Fn(body:, ..) = callback
+          // the callback is appended unlabelled, so label matching decides
+          // which parameter it fills (not always the last one)
+          let arguments = list.append(args, [g.UnlabelledField(callback)])
+          use #(c, call) <- result.map(infer_call(c, n, span, fun, arguments))
+          // now re-sugar into a use statement: the callback is the argument we
+          // appended, so it is last in caller order
+          let assert Ok(#(arguments, callback)) = split_last(call.arguments)
+          let assert Fn(body:, ..) = callback.item
           let #(patterns, body) = list.split(body, list.length(patterns))
           let patterns =
             list.map(patterns, fn(stmt) {
               let assert Assignment(pattern:, annotation:, ..) = stmt
               UsePattern(pattern, annotation)
             })
-            |> list.reverse
           let statement =
             Use(
               call.typ,
@@ -2027,7 +2077,6 @@ fn infer_body(
               patterns,
               call.function,
               arguments,
-              positional_arguments,
               body,
             )
           #(c, [statement])
@@ -3196,15 +3245,7 @@ fn substitute_statement(
   statement: Statement,
 ) -> Statement {
   case statement {
-    Use(
-      typ:,
-      location:,
-      patterns:,
-      function:,
-      arguments:,
-      positional_arguments:,
-      body:,
-    ) ->
+    Use(typ:, location:, patterns:, function:, arguments:, body:) ->
       Use(
         typ: substitute_type(c, rename, typ),
         location:,
@@ -3214,17 +3255,17 @@ fn substitute_statement(
           arguments,
           map_field(_, substitute_expression(c, rename, _)),
         ),
-        positional_arguments: list.map(
-          positional_arguments,
-          substitute_expression(c, rename, _),
-        ),
         body: list.map(body, substitute_statement(c, rename, _)),
       )
     Assignment(typ:, location:, kind:, pattern:, annotation:, value:) ->
       Assignment(
         typ: substitute_type(c, rename, typ),
         location:,
-        kind:,
+        kind: case kind {
+          LetAssert(Some(message)) ->
+            LetAssert(Some(substitute_expression(c, rename, message)))
+          Let | LetAssert(None) -> kind
+        },
         pattern: substitute_pattern(c, rename, pattern),
         annotation: option.map(annotation, substitute_annotation(c, rename, _)),
         value: substitute_expression(c, rename, value),

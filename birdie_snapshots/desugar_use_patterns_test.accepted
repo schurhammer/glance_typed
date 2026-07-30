@@ -1,0 +1,64 @@
+---
+version: 1.5.4
+title: desugar use patterns test
+---
+---
+kind: call
+type: "gleam.Int"
+function:
+  kind: function
+  type: "fn(gleam.Int, fn(#(gleam.Int, gleam.Int), gleam.String) -> gleam.Int) -> gleam.Int"
+  module: test
+  name: with_square
+positional_arguments:
+- kind: int_literal
+  type: "gleam.Int"
+  value: "3"
+- kind: fn
+  type: "fn(#(gleam.Int, gleam.Int), gleam.String) -> gleam.Int"
+  parameters:
+  - type: "#(gleam.Int, gleam.Int)"
+    name: P0
+  - type: "gleam.String"
+    name: P1
+  body:
+  - kind: assignment
+    type: "#(gleam.Int, gleam.Int)"
+    assignment_kind: let
+    pattern:
+      kind: tuple_pattern
+      type: "#(gleam.Int, gleam.Int)"
+      elements:
+      - kind: variable_pattern
+        type: "gleam.Int"
+        name: a
+      - kind: variable_pattern
+        type: "gleam.Int"
+        name: b
+    value:
+      kind: local_variable
+      type: "#(gleam.Int, gleam.Int)"
+      name: P0
+  - kind: assignment
+    type: "gleam.String"
+    assignment_kind: let
+    pattern:
+      kind: variable_pattern
+      type: "gleam.String"
+      name: s
+    value:
+      kind: local_variable
+      type: "gleam.String"
+      name: P1
+  - kind: binary_operator
+    type: "gleam.Int"
+    name: "+"
+    left:
+      kind: local_variable
+      type: "gleam.Int"
+      name: a
+    right:
+      kind: local_variable
+      type: "gleam.Int"
+      name: b
+

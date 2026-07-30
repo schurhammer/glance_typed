@@ -35,10 +35,6 @@ functions:
         kind: local_variable
         type: "gleam.Result(gleam.Int, gleam.String)"
         name: r
-    positional_arguments:
-    - kind: local_variable
-      type: "gleam.Result(gleam.Int, gleam.String)"
-      name: r
     body:
     - kind: binary_operator
       type: "gleam.Int"

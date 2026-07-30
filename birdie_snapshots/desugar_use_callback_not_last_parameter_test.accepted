@@ -1,0 +1,45 @@
+---
+version: 1.5.4
+title: desugar use callback not last parameter test
+---
+---
+kind: call
+type: "gleam.Int"
+function:
+  kind: function
+  type: "fn(fn(gleam.Int) -> gleam.Int, gleam.Int) -> gleam.Int"
+  module: test
+  name: apply
+positional_arguments:
+- kind: fn
+  type: "fn(gleam.Int) -> gleam.Int"
+  parameters:
+  - type: "gleam.Int"
+    name: P0
+  body:
+  - kind: assignment
+    type: "gleam.Int"
+    assignment_kind: let
+    pattern:
+      kind: variable_pattern
+      type: "gleam.Int"
+      name: x
+    value:
+      kind: local_variable
+      type: "gleam.Int"
+      name: P0
+  - kind: binary_operator
+    type: "gleam.Int"
+    name: "+"
+    left:
+      kind: local_variable
+      type: "gleam.Int"
+      name: x
+    right:
+      kind: int_literal
+      type: "gleam.Int"
+      value: "1"
+- kind: int_literal
+  type: "gleam.Int"
+  value: "1"
+

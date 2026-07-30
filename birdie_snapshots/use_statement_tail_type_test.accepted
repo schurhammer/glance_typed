@@ -52,16 +52,6 @@ functions:
         kind: int_literal
         type: "gleam.Int"
         value: "0"
-    positional_arguments:
-    - kind: local_variable
-      type: "gleam.Int"
-      name: ct
-    - kind: local_variable
-      type: "gleam.Int"
-      name: tokens
-    - kind: int_literal
-      type: "gleam.Int"
-      value: "0"
     body:
     - kind: call
       type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"

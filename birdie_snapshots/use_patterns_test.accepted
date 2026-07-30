@@ -34,10 +34,6 @@ functions:
         kind: int_literal
         type: "gleam.Int"
         value: "3"
-    positional_arguments:
-    - kind: int_literal
-      type: "gleam.Int"
-      value: "3"
     body:
     - kind: local_variable
       type: "gleam.Int"
