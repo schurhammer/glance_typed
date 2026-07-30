@@ -1449,3 +1449,23 @@ pub fn desugar_use_rejects_other_statements_test() {
   let assert [statement, ..] = function.definition.body
   let assert Error(Nil) = typed.desugar_use(statement)
 }
+
+pub fn wrong_arity_reports_original_counts_test() {
+  let assert typed.WrongArity(expected_arg_count: 2, actual_arg_count: 3, ..) =
+    infer_error_with_prelude(
+      "
+      fn f(a: Int, b: Int) -> Int { a }
+      pub fn g() -> Int { f(1, 2, 3) }
+      ",
+    )
+}
+
+pub fn wrong_arity_too_few_reports_original_counts_test() {
+  let assert typed.WrongArity(expected_arg_count: 3, actual_arg_count: 1, ..) =
+    infer_error_with_prelude(
+      "
+      fn f(a: Int, b: Int, c: Int) -> Int { a }
+      pub fn g() -> Int { f(1) }
+      ",
+    )
+}

@@ -2120,7 +2120,7 @@ fn do_match_labels(
       })
       |> result.try(fn(r) {
         let #(a, a_rest) = r
-        use rest <- result.map(match_labels(c, a_rest, p_rest))
+        use rest <- result.map(do_match_labels(c, a_rest, p_rest, lens))
         [a, ..rest]
       })
   }
