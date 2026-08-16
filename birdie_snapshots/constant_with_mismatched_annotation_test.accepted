@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: constant with mismatched annotation test
+file: ./test/glance_typed_test.gleam
+test_name: constant_with_mismatched_annotation_test
+---
+Incompatible types: a = NamedType("gleam", "Int", []), b = NamedType("gleam", "String", [])

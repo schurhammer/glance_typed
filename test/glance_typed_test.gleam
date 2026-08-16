@@ -964,6 +964,17 @@ pub fn constant_bool_test() {
   |> birdie.snap(title: "constant bool test")
 }
 
+pub fn constant_with_matching_annotation_test() {
+  infer_yaml_with_prelude("pub const x: Int = 42")
+  |> birdie.snap(title: "constant with matching annotation test")
+}
+
+pub fn constant_with_mismatched_annotation_test() {
+  infer_error_with_prelude("pub const x: String = 1")
+  |> typed.inspect_error
+  |> birdie.snap(title: "constant with mismatched annotation test")
+}
+
 pub fn external_function_test() {
   infer_yaml_with_prelude(
     "

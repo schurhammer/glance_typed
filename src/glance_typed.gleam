@@ -1084,11 +1084,17 @@ fn infer_constant(
     g.Private -> Private
   }
 
-  use #(c, annotation) <- result.map(infer_optional_annotation(
+  use #(c, annotation) <- result.try(infer_optional_annotation(
     c,
     dict.new(),
     con.annotation,
   ))
+
+  // if there is an annotation, the value must unify with it
+  use c <- result.map(case annotation {
+    Some(anno) -> unify(c, value.typ, anno.typ)
+    None -> Ok(c)
+  })
 
   let poly = generalise(c, value.typ)
 
