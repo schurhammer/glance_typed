@@ -2060,8 +2060,10 @@ fn infer_body(
 
           use #(c, message) <- result.try(case message {
             Some(msg) -> {
-              use #(c, msg) <- result.map(infer_expression(c, n, msg))
-              #(c, Some(msg))
+              // the message should be a string
+              use #(c, msg) <- result.try(infer_expression(c, n, msg))
+              use c <- result.try(unify(c, msg.typ, string_type))
+              Ok(#(c, Some(msg)))
             }
             None -> Ok(#(c, None))
           })

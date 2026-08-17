@@ -997,6 +997,12 @@ pub fn assert_statement_with_message_nil_type_test() {
   |> birdie.snap(title: "assert statement with message nil type test")
 }
 
+pub fn assert_statement_with_non_string_message_error_test() {
+  infer_error("pub fn f() { assert 1 == 1 as 5 }")
+  |> typed.inspect_error
+  |> birdie.snap(title: "assert statement with non string message error test")
+}
+
 pub fn external_function_test() {
   infer_yaml_with_prelude(
     "

@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: assert statement with non string message error test
+file: ./test/glance_typed_test.gleam
+test_name: assert_statement_with_non_string_message_error_test
+---
+Incompatible types: a = NamedType("gleam", "Int", []), b = NamedType("gleam", "String", [])
