@@ -975,6 +975,28 @@ pub fn constant_with_mismatched_annotation_test() {
   |> birdie.snap(title: "constant with mismatched annotation test")
 }
 
+pub fn assert_statement_nil_type_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f() {
+      assert 1 == 1
+    }
+    ",
+  )
+  |> birdie.snap(title: "assert statement nil type test")
+}
+
+pub fn assert_statement_with_message_nil_type_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f() {
+      assert 1 == 1 as \"not equal\"
+    }
+    ",
+  )
+  |> birdie.snap(title: "assert statement with message nil type test")
+}
+
 pub fn external_function_test() {
   infer_yaml_with_prelude(
     "

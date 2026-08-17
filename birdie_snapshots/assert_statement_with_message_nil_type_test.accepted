@@ -1,0 +1,32 @@
+---
+version: 1.5.4
+title: assert statement with message nil type test
+file: ./test/glance_typed_test.gleam
+test_name: assert_statement_with_message_nil_type_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Nil"
+  publicity: public
+  body:
+  - kind: assert
+    type: "gleam.Nil"
+    expression:
+      kind: binary_operator
+      type: "gleam.Bool"
+      name: "=="
+      left:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+      right:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+    message:
+      kind: string_literal
+      type: "gleam.String"
+      value: "not equal"
+

@@ -1927,7 +1927,11 @@ fn infer_pattern(
   }
 }
 
-fn resolve_constructor(c: Context, module: Option(String), constructor: String) {
+fn resolve_constructor(
+  c: Context,
+  module: Option(String),
+  constructor: String,
+) {
   use constructor <- result.try(resolve_constructor_name(c, module, constructor))
   case constructor {
     FunctionGlobal(module:, name:, typ:, labels:) ->
@@ -2035,7 +2039,8 @@ fn infer_body(
             None -> Ok(#(c, None))
           })
 
-          let statement = Assert(expression.typ, location, expression, message)
+          // `assert` always evaluates to Nil, regardless of the subject's type
+          let statement = Assert(nil_type, location, expression, message)
 
           // infer the rest of the body
           use #(c, rest) <- result.map(infer_body(c, n, xs))
