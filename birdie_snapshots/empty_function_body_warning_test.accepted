@@ -1,0 +1,22 @@
+---
+version: 1.5.4
+title: empty function body warning test
+file: ./test/glance_typed_test.gleam
+test_name: empty_function_body_warning_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "(0) fn() -> 0"
+  publicity: public
+  body:
+  - kind: todo
+    type: "0"
+warnings:
+- kind: empty_function
+  location:
+    module: test
+    definition: f
+    span: "0-13"
+

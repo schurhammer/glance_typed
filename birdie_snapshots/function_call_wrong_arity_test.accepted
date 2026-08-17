@@ -1,5 +1,7 @@
 ---
 version: 1.5.4
 title: function call wrong arity test
+file: ./test/glance_typed_test.gleam
+test_name: function_call_wrong_arity_test
 ---
 Function with arity 1 called with 2 arguments

@@ -1,6 +1,8 @@
 ---
 version: 1.5.4
 title: use labelled callback parameter test
+file: ./test/glance_typed_test.gleam
+test_name: use_labelled_callback_parameter_test
 ---
 ---
 name: test

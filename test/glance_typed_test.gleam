@@ -1007,10 +1007,67 @@ pub fn external_function_test() {
   |> birdie.snap(title: "external function test")
 }
 
-pub fn empty_block_error_test() {
-  infer_error("pub fn f() { {} }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "empty block error test")
+pub fn empty_block_warning_test() {
+  infer_yaml_with_prelude("pub fn f() { {} }")
+  |> birdie.snap(title: "empty block warning test")
+}
+
+pub fn empty_function_body_warning_test() {
+  infer_yaml_with_prelude("pub fn f() {}")
+  |> birdie.snap(title: "empty function body warning test")
+}
+
+pub fn empty_anonymous_function_body_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f() {
+      fn() {}
+    }
+    ",
+  )
+  |> birdie.snap(title: "empty anonymous function body warning test")
+}
+
+pub fn incomplete_use_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    fn with_thing(callback: fn() -> Int) -> Int {
+      callback()
+    }
+    pub fn f() {
+      use <- with_thing()
+    }
+    ",
+  )
+  |> birdie.snap(title: "incomplete use warning test")
+}
+
+pub fn incomplete_use_with_pattern_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    fn with_thing(callback: fn(Int) -> Int) -> Int {
+      callback(1)
+    }
+    pub fn f() {
+      use x <- with_thing()
+    }
+    ",
+  )
+  |> birdie.snap(title: "incomplete use with pattern warning test")
+}
+
+pub fn incomplete_use_with_tuple_pattern_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    fn with_pair(callback: fn(#(Int, Int)) -> Int) -> Int {
+      callback(#(1, 2))
+    }
+    pub fn f() {
+      use #(a, b) <- with_pair()
+    }
+    ",
+  )
+  |> birdie.snap(title: "incomplete use with tuple pattern warning test")
 }
 
 pub fn invalid_tuple_access_error_test() {

@@ -1,0 +1,70 @@
+---
+version: 1.5.4
+title: incomplete use with tuple pattern warning test
+file: ./test/glance_typed_test.gleam
+test_name: incomplete_use_with_tuple_pattern_warning_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: use
+    type: "gleam.Int"
+    patterns:
+    - pattern:
+        kind: tuple_pattern
+        type: "#(gleam.Int, gleam.Int)"
+        elements:
+        - kind: variable_pattern
+          type: "gleam.Int"
+          name: a
+        - kind: variable_pattern
+          type: "gleam.Int"
+          name: b
+    function:
+      kind: function
+      type: "fn(fn(#(gleam.Int, gleam.Int)) -> gleam.Int) -> gleam.Int"
+      module: test
+      name: with_pair
+    body:
+    - kind: todo
+      type: "gleam.Int"
+- name: with_pair
+  type: "() fn(fn(#(gleam.Int, gleam.Int)) -> gleam.Int) -> gleam.Int"
+  publicity: private
+  parameters:
+  - type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Int"
+    name: callback
+    annotation:
+      annotation: "fn(#(Int, Int)) -> Int"
+      type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Int"
+  return:
+    annotation: Int
+    type: "gleam.Int"
+  body:
+  - kind: call
+    type: "gleam.Int"
+    function:
+      kind: local_variable
+      type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Int"
+      name: callback
+    positional_arguments:
+    - kind: tuple
+      type: "#(gleam.Int, gleam.Int)"
+      elements:
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "2"
+warnings:
+- kind: incomplete_use
+  location:
+    module: test
+    definition: f
+    span: "129-140"
+

@@ -1,0 +1,49 @@
+---
+version: 1.5.4
+title: incomplete use warning test
+file: ./test/glance_typed_test.gleam
+test_name: incomplete_use_warning_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: use
+    type: "gleam.Int"
+    function:
+      kind: function
+      type: "fn(fn() -> gleam.Int) -> gleam.Int"
+      module: test
+      name: with_thing
+    body:
+    - kind: todo
+      type: "gleam.Int"
+- name: with_thing
+  type: "() fn(fn() -> gleam.Int) -> gleam.Int"
+  publicity: private
+  parameters:
+  - type: "fn() -> gleam.Int"
+    name: callback
+    annotation:
+      annotation: "fn() -> Int"
+      type: "fn() -> gleam.Int"
+  return:
+    annotation: Int
+    type: "gleam.Int"
+  body:
+  - kind: call
+    type: "gleam.Int"
+    function:
+      kind: local_variable
+      type: "fn() -> gleam.Int"
+      name: callback
+warnings:
+- kind: incomplete_use
+  location:
+    module: test
+    definition: f
+    span: "104-116"
+

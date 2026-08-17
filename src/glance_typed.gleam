@@ -56,6 +56,7 @@ pub type Module {
     type_aliases: List(Definition(TypeAlias)),
     constants: List(Definition(ConstantDefinition)),
     functions: List(Definition(FunctionDefinition)),
+    warnings: List(Warning),
   )
 }
 
@@ -485,7 +486,6 @@ pub type Error {
   UnresolvedGlobal(location: Location, name: String)
   UnresolvedType(location: Location, name: String)
   UnresolvedFunction(location: Location, name: String)
-  EmptyBlock(location: Location)
   InvalidTupleAccess(location: Location)
   InvalidFieldAccess(location: Location)
   FieldNotFound(location: Location, name: String)
@@ -498,6 +498,18 @@ pub type Error {
   RecursiveTypeError(location: Location)
   BitPatternSegmentTypeOverSpecified(location: Location)
   InvalidAttributeArgument(location: Location)
+}
+
+/// The reason an implicit `todo` expression was inserted.
+pub type TodoKind {
+  EmptyFunction
+  EmptyBlock
+  IncompleteUse
+}
+
+/// A non-fatal problem found while type checking.
+pub type Warning {
+  ImplicitTodo(location: Location, kind: TodoKind)
 }
 
 type QName {
@@ -764,7 +776,7 @@ pub fn infer_module(
           let c = Context(..c, current_span: def.definition.location)
 
           // infer function
-          use #(c, fun) <- result.try(infer_function(c, def.definition))
+          use #(c, fun) <- result.try(infer_function(c, def))
           use attrs <- result.map(infer_attributes(c, def.attributes))
           let def = Definition(attrs, fun)
 
@@ -874,6 +886,7 @@ fn new_context(module_name: String) -> Context {
       type_aliases: [],
       constants: [],
       functions: [],
+      warnings: [],
       name: module_name,
     ),
     type_uid: 0,
@@ -940,10 +953,7 @@ fn use_callback(
   let body = list.append(assignments, body)
   // the callback's return type is recovered from the body's tail, since there
   // is nothing left to infer it from at this point
-  let return = case list.last(body) {
-    Ok(statement) -> statement.typ
-    Error(_) -> nil_type
-  }
+  let return = option.unwrap(body_type(body), nil_type)
   let typ = FunctionType(list.map(parameters, fn(p) { p.typ }), return)
   Fn(typ, location, parameters, None, body)
 }
@@ -963,7 +973,6 @@ pub fn inspect_error(error: Error) {
     UnresolvedType(name:, ..) -> "Type with name '" <> name <> "' not found"
     UnresolvedFunction(name:, ..) ->
       "Function with name '" <> name <> "' not found"
-    EmptyBlock(..) -> "Block is empty"
     InvalidTupleAccess(..) -> "Attempted tuple access on a non-tuple type"
     InvalidFieldAccess(..) -> "Attempted field access on a non-record type"
     FieldNotFound(name:, ..) ->
@@ -998,6 +1007,21 @@ pub fn inspect_error(error: Error) {
       "Bit pattern segment type set multiple times"
     InvalidAttributeArgument(..) ->
       "Unexpected expression for attribute argument (only variable or string are allowed)"
+  }
+}
+
+/// Returns a human-readable string description of the warning.
+pub fn inspect_warning(warning: Warning) {
+  case warning {
+    ImplicitTodo(kind:, ..) ->
+      case kind {
+        EmptyFunction ->
+          "Function body is empty, an implicit `todo` expression is inserted"
+        EmptyBlock ->
+          "Block is empty, an implicit `todo` expression is inserted"
+        IncompleteUse ->
+          "Use expression has no statements after it, an implicit `todo` expression is inserted"
+      }
   }
 }
 
@@ -1113,8 +1137,11 @@ fn infer_constant(
 
 fn infer_function(
   c: Context,
-  fun: g.Function,
+  def: g.Definition(g.Function),
 ) -> Result(#(Context, FunctionDefinition), Error) {
+  let is_external =
+    list.any(def.attributes, fn(attr) { attr.name == "external" })
+  let fun = def.definition
   use #(c, parameters, return) <- result.try(infer_function_parameters(
     c,
     fun.parameters,
@@ -1132,18 +1159,18 @@ fn infer_function(
       }
     })
 
-  // infer body
-  use #(c, body) <- result.try(infer_body(c, n, fun.body))
+  // an empty body is an implicit `todo`, unless the function is external
+  use #(c, body) <- result.try(case is_external {
+    True -> infer_body(c, n, fun.body)
+    False -> infer_body_or_todo(c, n, fun.body, EmptyFunction)
+  })
 
   // compute function type
   let parameter_types = list.map(parameters, fn(x) { x.typ })
   let typ = FunctionType(parameter_types, return_type)
 
   // unify the return type with the last statement
-  use c <- result.map(case list.last(body) {
-    Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> Ok(c)
-  })
+  use c <- result.map(unify_body_return(c, return_type, body))
 
   let name = fun.name
 
@@ -2066,6 +2093,15 @@ fn infer_body(
               g.Assignment(span, g.Let, pat.pattern, pat.annotation, param)
             })
           let body = list.append(assignments, xs)
+          // if there are no statements after the use, an implicit `todo` is appended
+          let #(c, body) = case xs {
+            [] -> {
+              let loc = Location(c.module.name, c.current_definition, span)
+              let c = warn(c, ImplicitTodo(loc, IncompleteUse))
+              #(c, list.append(body, [g.Expression(g.Todo(span, None))]))
+            }
+            _ -> #(c, body)
+          }
           let callback = g.Fn(span, params, None, body)
           // the callback is appended unlabelled, so label matching decides
           // which parameter it fills (not always the last one)
@@ -2081,6 +2117,8 @@ fn infer_body(
               let assert Assignment(pattern:, annotation:, ..) = stmt
               UsePattern(pattern, annotation)
             })
+          // TODO is "body" the correct thing to return here?
+          // It has let statements and todo added which we might not want here.
           let statement =
             Use(
               call.typ,
@@ -2093,6 +2131,39 @@ fn infer_body(
           #(c, [statement])
         }
       }
+  }
+}
+
+fn infer_body_or_todo(
+  c: Context,
+  n: LocalEnv,
+  body: List(g.Statement),
+  kind: TodoKind,
+) -> Result(#(Context, List(Statement)), Error) {
+  case body {
+    [] -> {
+      let #(c, statement) = implicit_todo(c, context_location(c), kind)
+      Ok(#(c, [statement]))
+    }
+    _ -> infer_body(c, n, body)
+  }
+}
+
+fn body_type(statements: List(Statement)) -> Option(Type) {
+  case list.last(statements) {
+    Ok(statement) -> Some(statement.typ)
+    Error(_) -> None
+  }
+}
+
+fn unify_body_return(
+  c: Context,
+  return_type: Type,
+  body: List(Statement),
+) -> Result(Context, Error) {
+  case body_type(body) {
+    Some(typ) -> unify(c, return_type, typ)
+    None -> Ok(c)
   }
 }
 
@@ -2201,11 +2272,14 @@ fn infer_expression(
       #(c, NegateBool(bool_type, location, e))
     }
     g.Block(location:, statements:) -> {
-      use #(c, statements) <- result.try(infer_body(c, n, statements))
-      case list.last(statements) {
-        Ok(last) -> Ok(#(c, Block(last.typ, location, statements)))
-        Error(_) -> Error(EmptyBlock(context_location(c)))
-      }
+      use #(c, statements) <- result.try(infer_body_or_todo(
+        c,
+        n,
+        statements,
+        EmptyBlock,
+      ))
+      let assert Some(typ) = body_type(statements)
+      Ok(#(c, Block(typ, location, statements)))
     }
     g.Panic(location:, message: e) -> {
       case e {
@@ -2941,13 +3015,10 @@ fn infer_fn(
     })
 
   // infer body
-  use #(c, body) <- result.try(infer_body(c, n, body))
+  use #(c, body) <- result.try(infer_body_or_todo(c, n, body, EmptyFunction))
 
   // unify the return type with the last statement
-  use c <- result.map(case list.last(body) {
-    Ok(statement) -> unify(c, return_type, statement.typ)
-    Error(_) -> Ok(c)
-  })
+  use c <- result.map(unify_body_return(c, return_type, body))
 
   let fun = Fn(typ:, location:, parameters:, return_annotation:, body:)
   #(c, fun)
@@ -3834,6 +3905,23 @@ fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
 
 fn context_location(c: Context) {
   Location(c.module.name, c.current_definition, c.current_span)
+}
+
+fn warn(c: Context, warning: Warning) -> Context {
+  update_module(c, fn(mod) {
+    Module(..mod, warnings: [warning, ..mod.warnings])
+  })
+}
+
+fn implicit_todo(
+  c: Context,
+  location: Location,
+  kind: TodoKind,
+) -> #(Context, Statement) {
+  let #(c, typ) = new_type_var_ref(c)
+  let todo_exp = Todo(typ, location.span, None)
+  let c = warn(c, ImplicitTodo(location, kind))
+  #(c, Expression(typ, location.span, todo_exp))
 }
 
 fn map_bit_string_segment_option(

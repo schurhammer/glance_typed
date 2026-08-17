@@ -1,8 +1,8 @@
 ---
 version: 1.5.4
-title: use statement test
+title: incomplete use with pattern warning test
 file: ./test/glance_typed_test.gleam
-test_name: use_statement_test
+test_name: incomplete_use_with_pattern_warning_test
 ---
 ---
 name: test
@@ -22,32 +22,37 @@ functions:
       kind: function
       type: "fn(fn(gleam.Int) -> gleam.Int) -> gleam.Int"
       module: test
-      name: with_value
+      name: with_thing
     body:
-    - kind: local_variable
+    - kind: todo
       type: "gleam.Int"
-      name: x
-- name: with_value
-  type: "(0) fn(fn(gleam.Int) -> 0) -> 0"
-  publicity: public
+- name: with_thing
+  type: "() fn(fn(gleam.Int) -> gleam.Int) -> gleam.Int"
+  publicity: private
   parameters:
-  - type: "fn(gleam.Int) -> 0"
+  - type: "fn(gleam.Int) -> gleam.Int"
     name: callback
     annotation:
-      annotation: "fn(Int) -> a"
-      type: "fn(gleam.Int) -> 0"
+      annotation: "fn(Int) -> Int"
+      type: "fn(gleam.Int) -> gleam.Int"
   return:
-    annotation: a
-    type: "0"
+    annotation: Int
+    type: "gleam.Int"
   body:
   - kind: call
-    type: "0"
+    type: "gleam.Int"
     function:
       kind: local_variable
-      type: "fn(gleam.Int) -> 0"
+      type: "fn(gleam.Int) -> gleam.Int"
       name: callback
     positional_arguments:
     - kind: int_literal
       type: "gleam.Int"
-      value: "42"
+      value: "1"
+warnings:
+- kind: incomplete_use
+  location:
+    module: test
+    definition: f
+    span: "110-122"
 

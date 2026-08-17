@@ -19,6 +19,39 @@ fn module_to_yaml(module: typed.Module) -> cymbal.Yaml {
     #("types", yaml_list(module.custom_types, custom_type_to_yaml)),
     #("constants", yaml_list(module.constants, constant_to_yaml)),
     #("functions", yaml_list(module.functions, function_to_yaml)),
+    #("warnings", yaml_list(module.warnings, warning_to_yaml)),
+  ])
+}
+
+fn warning_to_yaml(warning: typed.Warning) -> cymbal.Yaml {
+  case warning {
+    typed.ImplicitTodo(kind:, location:) ->
+      yaml_block([
+        #(
+          "kind",
+          cymbal.string(case kind {
+            typed.EmptyFunction -> "empty_function"
+            typed.EmptyBlock -> "empty_block"
+            typed.IncompleteUse -> "incomplete_use"
+          }),
+        ),
+        #("location", location_to_yaml(location)),
+      ])
+  }
+}
+
+fn location_to_yaml(location: typed.Location) -> cymbal.Yaml {
+  yaml_block([
+    #("module", cymbal.string(location.module)),
+    #("definition", cymbal.string(location.definition)),
+    #(
+      "span",
+      cymbal.string(
+        int.to_string(location.span.start)
+        <> "-"
+        <> int.to_string(location.span.end),
+      ),
+    ),
   ])
 }
 
@@ -755,7 +788,9 @@ fn attribute_to_yaml(attribute: typed.Attribute) -> cymbal.Yaml {
   ])
 }
 
-fn attribute_argument_to_yaml(argument: typed.AttributeArgument) -> cymbal.Yaml {
+fn attribute_argument_to_yaml(
+  argument: typed.AttributeArgument,
+) -> cymbal.Yaml {
   case argument {
     typed.NameAttributeArgument(name:) ->
       yaml_block([#("name", cymbal.string(name))])

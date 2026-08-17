@@ -1,6 +1,8 @@
 ---
 version: 1.5.4
 title: use statement tail type test
+file: ./test/glance_typed_test.gleam
+test_name: use_statement_tail_type_test
 ---
 ---
 name: test

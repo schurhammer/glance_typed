@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: empty block error test
-file: ./test/glance_typed_test.gleam
-test_name: empty_block_error_test
----
-Block is empty

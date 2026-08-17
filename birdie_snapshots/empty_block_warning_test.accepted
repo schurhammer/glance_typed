@@ -1,0 +1,25 @@
+---
+version: 1.5.4
+title: empty block warning test
+file: ./test/glance_typed_test.gleam
+test_name: empty_block_warning_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "(0) fn() -> 0"
+  publicity: public
+  body:
+  - kind: block
+    type: "0"
+    statements:
+    - kind: todo
+      type: "0"
+warnings:
+- kind: empty_block
+  location:
+    module: test
+    definition: f
+    span: "13-15"
+

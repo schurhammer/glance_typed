@@ -1,6 +1,8 @@
 ---
 version: 1.5.4
 title: use result map test
+file: ./test/glance_typed_test.gleam
+test_name: use_result_map_test
 ---
 ---
 name: example

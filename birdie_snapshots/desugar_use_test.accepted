@@ -1,6 +1,8 @@
 ---
 version: 1.5.4
 title: desugar use test
+file: ./test/glance_typed_test.gleam
+test_name: desugar_use_test
 ---
 ---
 kind: call
