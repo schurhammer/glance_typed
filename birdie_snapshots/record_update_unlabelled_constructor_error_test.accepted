@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: record update unlabelled constructor error test
+file: ./test/glance_typed_test.gleam
+test_name: record_update_unlabelled_constructor_error_test
+---
+This constructor has no labelled fields, so it cannot be used with the update syntax

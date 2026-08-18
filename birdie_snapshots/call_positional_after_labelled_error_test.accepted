@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: call positional after labelled error test
+file: ./test/glance_typed_test.gleam
+test_name: call_positional_after_labelled_error_test
+---
+Positional arguments cannot follow a labelled argument

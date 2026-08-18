@@ -4,4 +4,4 @@ title: label not found test
 file: ./test/glance_typed_test.gleam
 test_name: label_not_found_test
 ---
-Function with arity 1 called with 1 arguments
+'y' is not a valid label

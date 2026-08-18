@@ -1003,6 +1003,203 @@ pub fn assert_statement_with_non_string_message_error_test() {
   |> birdie.snap(title: "assert statement with non string message error test")
 }
 
+pub fn record_update_unknown_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) { Point(..p, zzz: 1) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "record update unknown label error test")
+}
+
+pub fn record_update_duplicate_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) { Point(..p, x: 1, x: 2) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "record update duplicate label error test")
+}
+
+pub fn record_update_unlabelled_constructor_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Pair { Pair(Int, Int) }
+
+    pub fn f(p: Pair) { Pair(..p) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "record update unlabelled constructor error test")
+}
+
+pub fn record_update_no_fields_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) { Point(..p) }
+    ",
+  )
+  |> birdie.snap(title: "record update no fields warning test")
+}
+
+pub fn record_update_all_fields_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) { Point(..p, x: 1, y: 2) }
+    ",
+  )
+  |> birdie.snap(title: "record update all fields warning test")
+}
+
+pub fn call_duplicate_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn add(x x: Int, y y: Int) -> Int { x }
+
+    pub fn f() { add(x: 1, x: 2) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "call duplicate label error test")
+}
+
+pub fn call_unknown_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn add(x x: Int, y y: Int) -> Int { x }
+
+    pub fn f() { add(x: 1, zzz: 2) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "call unknown label error test")
+}
+
+pub fn call_positional_after_labelled_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn add(x x: Int, y y: Int) -> Int { x }
+
+    pub fn f() { add(x: 1, 2) }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "call positional after labelled error test")
+}
+
+pub fn pattern_positional_after_labelled_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(x: 1, 2) = p
+      1
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "pattern positional after labelled error test")
+}
+
+pub fn pattern_spread_unknown_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(zzz: 1, ..) = p
+      1
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "pattern spread unknown label error test")
+}
+
+pub fn pattern_spread_duplicate_label_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(x: 1, x: 2, ..) = p
+      1
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "pattern spread duplicate label error test")
+}
+
+pub fn pattern_spread_positional_after_labelled_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(x: 1, 2, ..) = p
+      1
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "pattern spread positional after labelled error test")
+}
+
+pub fn pattern_spread_unnecessary_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(x: 1, y: 2, ..) = p
+      1
+    }
+    ",
+  )
+  |> birdie.snap(title: "pattern spread unnecessary warning test")
+}
+
+pub fn pattern_spread_no_fields_warning_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Empty { Empty }
+
+    pub fn f(e: Empty) {
+      let Empty(..) = e
+      1
+    }
+    ",
+  )
+  |> birdie.snap(title: "pattern spread no fields warning test")
+}
+
+pub fn pattern_spread_too_many_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) {
+      let Point(1, 2, 3, ..) = p
+      1
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "pattern spread too many error test")
+}
+
 pub fn external_function_test() {
   infer_yaml_with_prelude(
     "
@@ -1228,7 +1425,7 @@ pub fn record_update_fields_out_of_order_test() {
     "
     pub type Point { Point(x: Int, y: Int, z: Int) }
     pub fn reset(p: Point, a: Int, b: Int, c: Int) {
-      Point(..p, z: c, x: a, y: b)
+      Point(..p, z: c, x: a)
     }
     ",
   )
@@ -1544,6 +1741,23 @@ pub fn desugar_use_rejects_other_statements_test() {
     list.find(module.functions, fn(d) { d.definition.name == "main" })
   let assert [statement, ..] = function.definition.body
   let assert Error(Nil) = typed.desugar_use(statement)
+}
+
+pub fn desugar_use_mixed_positional_and_labelled_test() {
+  infer_with_prelude(
+    "
+    fn apply(a: Int, callback f: fn(Int) -> Int, b b: Int) -> Int {
+      f(a) + b
+    }
+
+    pub fn main() -> Int {
+      use x <- apply(1, b: 2)
+      x + 1
+    }
+    ",
+  )
+  |> desugar_first_use("main")
+  |> birdie.snap(title: "desugar use mixed positional and labelled test")
 }
 
 pub fn wrong_arity_reports_original_counts_test() {

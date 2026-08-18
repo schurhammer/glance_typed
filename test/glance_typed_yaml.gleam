@@ -27,14 +27,27 @@ fn warning_to_yaml(warning: typed.Warning) -> cymbal.Yaml {
   case warning {
     typed.ImplicitTodo(kind:, location:) ->
       yaml_block([
+        #("kind", cymbal.string("implicit_todo")),
         #(
-          "kind",
+          "todo_kind",
           cymbal.string(case kind {
             typed.EmptyFunction -> "empty_function"
             typed.EmptyBlock -> "empty_block"
             typed.IncompleteUse -> "incomplete_use"
           }),
         ),
+        #("location", location_to_yaml(location)),
+      ])
+    typed.UnnecessarySpread(location:, field_count:) ->
+      yaml_block([
+        #("kind", cymbal.string("unnecessary_spread")),
+        #("field_count", cymbal.int(field_count)),
+        #("location", location_to_yaml(location)),
+      ])
+    typed.UnnecessaryRecordUpdate(location:, field_count:) ->
+      yaml_block([
+        #("kind", cymbal.string("unnecessary_record_update")),
+        #("field_count", cymbal.int(field_count)),
         #("location", location_to_yaml(location)),
       ])
   }

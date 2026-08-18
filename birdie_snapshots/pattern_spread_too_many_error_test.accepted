@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: pattern spread too many error test
+file: ./test/glance_typed_test.gleam
+test_name: pattern_spread_too_many_error_test
+---
+Expected 2 argument(s), got 3

@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: record update duplicate label error test
+file: ./test/glance_typed_test.gleam
+test_name: record_update_duplicate_label_error_test
+---
+The label 'x' has already been given a value

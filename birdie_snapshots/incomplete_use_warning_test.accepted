@@ -41,7 +41,8 @@ functions:
       type: "fn() -> gleam.Int"
       name: callback
 warnings:
-- kind: incomplete_use
+- kind: implicit_todo
+  todo_kind: incomplete_use
   location:
     module: test
     definition: f

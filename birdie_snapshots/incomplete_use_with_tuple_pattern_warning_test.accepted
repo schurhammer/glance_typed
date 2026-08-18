@@ -62,7 +62,8 @@ functions:
         type: "gleam.Int"
         value: "2"
 warnings:
-- kind: incomplete_use
+- kind: implicit_todo
+  todo_kind: incomplete_use
   location:
     module: test
     definition: f

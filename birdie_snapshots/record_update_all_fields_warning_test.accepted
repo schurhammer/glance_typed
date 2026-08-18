@@ -1,8 +1,8 @@
 ---
 version: 1.5.4
-title: record update fields out of order test
+title: record update all fields warning test
 file: ./test/glance_typed_test.gleam
-test_name: record_update_fields_out_of_order_test
+test_name: record_update_all_fields_warning_test
 ---
 ---
 name: test
@@ -13,7 +13,7 @@ types:
   opaque: false
   variants:
   - name: Point
-    type: "() fn(gleam.Int, gleam.Int, gleam.Int) -> test.Point"
+    type: "() fn(gleam.Int, gleam.Int) -> test.Point"
     fields:
     - label: x
       annotation:
@@ -23,13 +23,9 @@ types:
       annotation:
         annotation: Int
         type: "gleam.Int"
-    - label: z
-      annotation:
-        annotation: Int
-        type: "gleam.Int"
 functions:
-- name: reset
-  type: "() fn(test.Point, gleam.Int, gleam.Int, gleam.Int) -> test.Point"
+- name: f
+  type: "() fn(test.Point) -> test.Point"
   publicity: public
   parameters:
   - type: "test.Point"
@@ -37,21 +33,6 @@ functions:
     annotation:
       annotation: Point
       type: "test.Point"
-  - type: "gleam.Int"
-    name: a
-    annotation:
-      annotation: Int
-      type: "gleam.Int"
-  - type: "gleam.Int"
-    name: b
-    annotation:
-      annotation: Int
-      type: "gleam.Int"
-  - type: "gleam.Int"
-    name: c
-    annotation:
-      annotation: Int
-      type: "gleam.Int"
   body:
   - kind: record_update
     type: "test.Point"
@@ -62,11 +43,17 @@ functions:
       type: "test.Point"
       name: p
     positional_arguments:
-    - kind: local_variable
+    - kind: int_literal
       type: "gleam.Int"
-      name: a
-    - unchanged: "gleam.Int"
-    - kind: local_variable
+      value: "1"
+    - kind: int_literal
       type: "gleam.Int"
-      name: c
+      value: "2"
+warnings:
+- kind: unnecessary_record_update
+  field_count: 2
+  location:
+    module: test
+    definition: f
+    span: "92-93"
 

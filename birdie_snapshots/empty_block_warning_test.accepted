@@ -17,7 +17,8 @@ functions:
     - kind: todo
       type: "0"
 warnings:
-- kind: empty_block
+- kind: implicit_todo
+  todo_kind: empty_block
   location:
     module: test
     definition: f

@@ -1,0 +1,55 @@
+---
+version: 1.5.4
+title: record update no fields warning test
+file: ./test/glance_typed_test.gleam
+test_name: record_update_no_fields_warning_test
+---
+---
+name: test
+types:
+- name: Point
+  type: "() test.Point"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Point
+    type: "() fn(gleam.Int, gleam.Int) -> test.Point"
+    fields:
+    - label: x
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+    - label: y
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+functions:
+- name: f
+  type: "() fn(test.Point) -> test.Point"
+  publicity: public
+  parameters:
+  - type: "test.Point"
+    name: p
+    annotation:
+      annotation: Point
+      type: "test.Point"
+  body:
+  - kind: record_update
+    type: "test.Point"
+    module: test
+    constructor: Point
+    record:
+      kind: local_variable
+      type: "test.Point"
+      name: p
+    positional_arguments:
+    - unchanged: "gleam.Int"
+    - unchanged: "gleam.Int"
+warnings:
+- kind: unnecessary_record_update
+  field_count: 0
+  location:
+    module: test
+    definition: f
+    span: "80-81"
+

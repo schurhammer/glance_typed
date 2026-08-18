@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: pattern spread positional after labelled error test
+file: ./test/glance_typed_test.gleam
+test_name: pattern_spread_positional_after_labelled_error_test
+---
+Positional arguments cannot follow a labelled argument

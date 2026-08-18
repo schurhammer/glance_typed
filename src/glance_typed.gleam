@@ -493,6 +493,9 @@ pub type Error {
   NotAFunction(location: Location, name: String)
   WrongArity(location: Location, expected_arg_count: Int, actual_arg_count: Int)
   LabelNotFound(location: Location, name: String)
+  DuplicateLabel(location: Location, name: String)
+  RecordUpdateOnUnlabelledConstructor(location: Location)
+  UnexpectedPositionalArgument(location: Location)
   TupleIndexOutOfBounds(location: Location, tuple_size: Int, index: Int)
   IncompatibleTypes(location: Location, type_a: Type, type_b: Type)
   RecursiveTypeError(location: Location)
@@ -509,7 +512,12 @@ pub type TodoKind {
 
 /// A non-fatal problem found while type checking.
 pub type Warning {
+  /// An implicit todo was inserted in an empty function, block, or use statement.
   ImplicitTodo(location: Location, kind: TodoKind)
+  /// An unnecessarry spread operator on a pattern match.
+  UnnecessarySpread(location: Location, field_count: Int)
+  /// An unnecessarry record update, either nothing updated or everything updated.
+  UnnecessaryRecordUpdate(location: Location, field_count: Int)
 }
 
 type QName {
@@ -912,16 +920,9 @@ pub fn desugar_use(statement: Statement) -> Result(Expression, Nil) {
         _ -> list.map(arguments, fn(_) { None })
       }
       use positional <- result.map(
-        match_labels_optional(arguments, labels)
-        |> list.try_map(option.to_result(_, Nil)),
+        match_fields(arguments, labels) |> result.replace_error(Nil),
       )
-      Call(
-        typ,
-        location,
-        function,
-        arguments,
-        list.map(positional, fn(field) { field.item }),
-      )
+      Call(typ, location, function, arguments, positional)
     }
     _ -> Error(Nil)
   }
@@ -981,15 +982,17 @@ pub fn inspect_error(error: Error) {
       "Type variable with name '" <> name <> "' not found"
     NotAFunction(name:, ..) -> "The variable '" <> name <> "' is not a function"
     WrongArity(expected_arg_count:, actual_arg_count:, ..) ->
-      "Function with arity "
+      "Expected "
       <> int.to_string(expected_arg_count)
-      <> " called with "
+      <> " argument(s), got "
       <> int.to_string(actual_arg_count)
-      <> " arguments"
-    LabelNotFound(name:, ..) ->
-      "The called function does not have an argument with label '"
-      <> name
-      <> "'"
+    LabelNotFound(name:, ..) -> "'" <> name <> "' is not a valid label"
+    DuplicateLabel(name:, ..) ->
+      "The label '" <> name <> "' has already been given a value"
+    RecordUpdateOnUnlabelledConstructor(..) ->
+      "This constructor has no labelled fields, so it cannot be used with the update syntax"
+    UnexpectedPositionalArgument(..) ->
+      "Positional arguments cannot follow a labelled argument"
     TupleIndexOutOfBounds(tuple_size:, index:, ..) ->
       "Tuple index "
       <> int.to_string(index)
@@ -1022,6 +1025,18 @@ pub fn inspect_warning(warning: Warning) {
         IncompleteUse ->
           "Use expression has no statements after it, an implicit `todo` expression is inserted"
       }
+    UnnecessarySpread(field_count: 0, ..) ->
+      "This constructor has no fields, so `..` matches nothing"
+    UnnecessarySpread(field_count:, ..) ->
+      "All "
+      <> int.to_string(field_count)
+      <> " fields are already matched, so `..` matches nothing"
+    UnnecessaryRecordUpdate(field_count: 0, ..) ->
+      "This update sets no fields, so it is unchanged from the original"
+    UnnecessaryRecordUpdate(field_count:, ..) ->
+      "This update sets all "
+      <> int.to_string(field_count)
+      <> " fields, so `..` has no effect"
   }
 }
 
@@ -1863,44 +1878,15 @@ fn infer_pattern(
         resolve_constructor(c, module, constructor),
       )
 
+      use _ <- result.try(check_arg_order(c, arguments, fn(p) { p.location }))
+
       // infer the type of all arguments
-      let arguments =
-        list.map(arguments, fn(arg) {
-          case arg {
-            g.LabelledField(label:, label_location:, item:) ->
-              LabelledField(item, label, label_location)
-            g.ShorthandField(label:, location:) ->
-              ShorthandField(
-                g.PatternVariable(location, label),
-                label,
-                location,
-              )
-            g.UnlabelledField(item:) -> UnlabelledField(item)
-          }
-        })
+      let arguments = list.map(arguments, convert_field(_, g.PatternVariable))
       use #(c, n, arguments) <- result.try(infer_pattern_fields(c, n, arguments))
 
       // handle labels
-      use #(c, positional_arguments) <- result.try(case with_spread {
-        True -> {
-          let #(c, args) =
-            match_labels_optional(arguments, labels)
-            |> list.fold(#(c, []), fn(acc, opt) {
-              let #(c, opts) = acc
-              let #(c, opt) = case opt {
-                Some(opt) -> #(c, Some(opt.item))
-                None -> #(c, None)
-              }
-              #(c, [opt, ..opts])
-            })
-          Ok(#(c, list.reverse(args)))
-        }
-        False -> {
-          use args <- result.map(match_labels(c, arguments, labels))
-          let args = list.map(args, fn(arg) { Some(arg.item) })
-          #(c, args)
-        }
-      })
+      let matched = match_pattern_args(c, arguments, labels, with_spread)
+      use #(c, positional_arguments) <- result.try(matched)
 
       let #(c, tagged_arguments) =
         list.map_fold(positional_arguments, c, fn(c, x) {
@@ -2105,10 +2091,8 @@ fn infer_body(
             _ -> #(c, body)
           }
           let callback = g.Fn(span, params, None, body)
-          // the callback is appended unlabelled, so label matching decides
-          // which parameter it fills (not always the last one)
-          let arguments = list.append(args, [g.UnlabelledField(callback)])
-          use #(c, call) <- result.map(infer_call(c, n, span, fun, arguments))
+          let inferred = infer_call(c, n, span, fun, args, Some(callback))
+          use #(c, call) <- result.map(inferred)
           // now re-sugar into a use statement: the callback is the argument we
           // appended, so it is last in caller order
           let assert Ok(#(arguments, callback)) = split_last(call.arguments)
@@ -2169,66 +2153,172 @@ fn unify_body_return(
   }
 }
 
-fn match_labels(
-  c: Context,
-  args: List(Field(a)),
-  params: List(Option(String)),
-) -> Result(List(Field(a)), Error) {
-  do_match_labels(c, args, params, #(list.length(params), list.length(args)))
+type MatchError {
+  UnknownLabelGiven(label: String)
+  LabelGivenTwice(label: String)
+  ArityMismatch
 }
 
-fn do_match_labels(
-  c: Context,
-  args: List(Field(a)),
-  params: List(Option(String)),
-  lens: #(Int, Int),
-) -> Result(List(Field(a)), Error) {
-  // find the labels in the order specified by parameters
-  // either we find the matching label or default to the first unlabelled arg
-  case params {
-    [] ->
-      case args {
-        [] -> Ok([])
-        _ -> Error(WrongArity(context_location(c), lens.0, lens.1))
+/// Look up each arg's associated param, returning them as matching tuples.
+fn resolve_labelled(
+  args: List(#(String, a)),
+  params: List(#(String, b)),
+) -> Result(List(#(b, a)), MatchError) {
+  let initial: List(#(b, a)) = []
+  use resolved <- result.try(
+    list.try_fold(args, initial, fn(resolved, arg) {
+      let #(label, value) = arg
+      case list.find(params, fn(p) { p.0 == label }) {
+        Ok(#(_, associated)) ->
+          case list.any(resolved, fn(r) { r.0 == associated }) {
+            True -> Error(LabelGivenTwice(label))
+            False -> Ok([#(associated, value), ..resolved])
+          }
+        Error(_) -> Error(UnknownLabelGiven(label))
       }
-    [p, ..p_rest] ->
-      extract_matching(args, fn(a) { field_label(a) == p })
-      |> result.try_recover(fn(_) {
-        extract_matching(args, fn(a) { field_label(a) == None })
-      })
-      |> result.map_error(fn(_) {
-        case p {
-          Some(l) -> LabelNotFound(context_location(c), l)
-          None -> WrongArity(context_location(c), lens.0, lens.1)
-        }
-      })
-      |> result.try(fn(r) {
-        let #(a, a_rest) = r
-        use rest <- result.map(do_match_labels(c, a_rest, p_rest, lens))
-        [a, ..rest]
-      })
+    }),
+  )
+  Ok(list.reverse(resolved))
+}
+
+/// Check that all positional arguments come before all labelled arguments.
+fn check_arg_order(
+  c: Context,
+  args: List(g.Field(a)),
+  location: fn(a) -> Span,
+) -> Result(Nil, Error) {
+  list.try_fold(args, False, fn(seen_labelled, arg) {
+    case arg, seen_labelled {
+      g.UnlabelledField(item:), True ->
+        Error(UnexpectedPositionalArgument(span_location(c, location(item))))
+      g.UnlabelledField(..), False -> Ok(False)
+      _, _ -> Ok(True)
+    }
+  })
+  |> result.replace(Nil)
+}
+
+/// Convert a source level field into a typed field of the given constructor.
+fn convert_field(
+  field: g.Field(a),
+  variable: fn(Span, String) -> a,
+) -> Field(a) {
+  case field {
+    g.LabelledField(label:, label_location:, item:) ->
+      LabelledField(item, label, label_location)
+    g.ShorthandField(label:, location:) ->
+      ShorthandField(variable(location, label), label, location)
+    g.UnlabelledField(item:) -> UnlabelledField(item)
   }
 }
 
-fn match_labels_optional(
+/// Split a list of fields into the unlabelled and labelled items.
+fn split_positional_labelled(
   args: List(Field(a)),
+) -> #(List(a), List(#(String, a))) {
+  let #(positional, labelled) =
+    list.fold(args, #([], []), fn(acc, arg) {
+      let #(positional, labelled) = acc
+      case field_label(arg) {
+        Some(label) -> #(positional, [#(label, arg.item), ..labelled])
+        None -> #([arg.item, ..positional], labelled)
+      }
+    })
+  #(list.reverse(positional), list.reverse(labelled))
+}
+
+fn param_labels(params: List(Option(String))) -> List(#(String, String)) {
+  list.filter_map(params, fn(param) {
+    case param {
+      Some(label) -> Ok(#(label, label))
+      None -> Error(Nil)
+    }
+  })
+}
+
+fn match_params(
   params: List(Option(String)),
-) -> List(Option(Field(a))) {
-  // find the labels in the order specified by parameters
-  case params {
-    [] -> []
-    [p, ..p_rest] ->
-      case extract_matching(args, fn(a) { field_label(a) == p }) {
-        Ok(#(a, a_rest)) -> [Some(a), ..match_labels_optional(a_rest, p_rest)]
+  positional: List(a),
+  resolved: List(#(String, a)),
+) -> #(List(Option(a)), List(a), Bool) {
+  let #(#(leftover, unmatched), matched) =
+    list.map_fold(params, #(positional, False), fn(state, param) {
+      let #(remaining, unmatched) = state
+      let by_label = case param {
+        Some(label) -> list.key_find(resolved, label)
+        None -> Error(Nil)
+      }
+      case by_label {
+        Ok(value) -> #(state, Some(value))
         Error(_) ->
-          case extract_matching(args, fn(a) { field_label(a) == None }) {
-            Ok(#(a, a_rest)) -> [
-              Some(a),
-              ..match_labels_optional(a_rest, p_rest)
-            ]
-            Error(_) -> [None, ..match_labels_optional(args, p_rest)]
+          case remaining {
+            [value, ..rest] -> #(#(rest, unmatched), Some(value))
+            [] -> #(#(remaining, True), None)
           }
       }
+    })
+  #(matched, leftover, unmatched)
+}
+
+fn match_error(
+  c: Context,
+  params: List(Option(String)),
+  args: List(b),
+  err: MatchError,
+) -> Error {
+  case err {
+    UnknownLabelGiven(label) -> LabelNotFound(context_location(c), label)
+    LabelGivenTwice(label) -> DuplicateLabel(context_location(c), label)
+    ArityMismatch ->
+      WrongArity(context_location(c), list.length(params), list.length(args))
+  }
+}
+
+fn resolve_field_labels(
+  positional: List(a),
+  labelled: List(#(String, a)),
+  params: List(Option(String)),
+) -> Result(#(List(Option(a)), List(a), Bool), MatchError) {
+  use resolved <- result.try(resolve_labelled(labelled, param_labels(params)))
+  Ok(match_params(params, positional, resolved))
+}
+
+/// Match a list of fields against a list of parameters.
+/// Returns the items in parameter order.
+fn match_fields(
+  args: List(Field(a)),
+  params: List(Option(String)),
+) -> Result(List(a), MatchError) {
+  let #(positional, labelled) = split_positional_labelled(args)
+  use matched <- result.try(resolve_field_labels(positional, labelled, params))
+  case matched {
+    #(matched, [], False) ->
+      Ok(list.filter_map(matched, option.to_result(_, Nil)))
+    _ -> Error(ArityMismatch)
+  }
+}
+
+fn match_pattern_args(
+  c: Context,
+  args: List(Field(a)),
+  params: List(Option(String)),
+  with_spread: Bool,
+) -> Result(#(Context, List(Option(a))), Error) {
+  let #(positional, labelled) = split_positional_labelled(args)
+  use #(matched, leftover, unmatched) <- result.try(
+    resolve_field_labels(positional, labelled, params)
+    |> result.map_error(match_error(c, params, args, _)),
+  )
+
+  case leftover, unmatched, with_spread {
+    [_, ..], _, _ | [], True, False ->
+      Error(match_error(c, params, args, ArityMismatch))
+    [], False, True ->
+      Ok(#(
+        warn(c, UnnecessarySpread(context_location(c), list.length(params))),
+        matched,
+      ))
+    [], _, _ -> Ok(#(c, matched))
   }
 }
 
@@ -2407,38 +2497,60 @@ fn infer_expression(
       )
       let updated_fields = list.reverse(updated_fields)
 
-      let fields =
-        list.map(updated_fields, fn(x) {
-          let assert Some(expr) = x.item
-          LabelledField(expr, x.label, Span(0, 0))
+      // Collect the labelled fields of the constructor
+      let labelled_fields =
+        list.zip(labels, constructor_args)
+        |> list.filter_map(fn(pair) {
+          case pair.0 {
+            Some(label) -> Ok(#(label, pair.1))
+            None -> Error(Nil)
+          }
         })
-      let positional_fields = match_labels_optional(fields, labels)
-      use positional_fields <- result.try(
-        list.strict_zip(positional_fields, list.zip(labels, constructor_args))
-        |> result.map_error(fn(_) {
-          WrongArity(
-            context_location(c),
-            list.length(constructor_args),
-            list.length(positional_fields),
-          )
+
+      // The update syntax requires at least one labelled field
+      use c <- result.try(case labelled_fields {
+        [] -> Error(RecordUpdateOnUnlabelledConstructor(context_location(c)))
+        _ -> Ok(c)
+      })
+
+      // Match each given field to a parameter
+      let given =
+        list.map(updated_fields, fn(field) {
+          let assert Some(value) = field.item
+          #(field.label, value)
+        })
+
+      // Updating no fields or all fields is unnecessary so add a warning
+      let given_count = list.length(given)
+      let total_count = list.length(labelled_fields)
+      let c = case given_count {
+        0 -> warn(c, UnnecessaryRecordUpdate(context_location(c), 0))
+        _ if given_count == total_count ->
+          warn(c, UnnecessaryRecordUpdate(context_location(c), given_count))
+        _ -> c
+      }
+
+      use #(matched, _, _) <- result.try(
+        resolve_field_labels([], given, labels)
+        |> result.map_error(match_error(c, labels, given, _)),
+      )
+
+      // Check the type of each updated value against its parameter
+      use c <- result.try(
+        list.try_fold(given, c, fn(c, entry) {
+          let #(label, value) = entry
+          let assert Ok(expected) = list.key_find(labelled_fields, label)
+          unify(c, value.typ, expected)
         }),
       )
 
-      use #(c, positional_fields) <- result.map(
-        list.try_fold(positional_fields, #(c, []), fn(acc, x) {
-          let #(c, fields) = acc
-          let #(given, #(_param_label, expected)) = x
-          use #(c, result) <- result.map(case given {
-            Some(e) -> {
-              use c <- result.map(unify(c, e.item.typ, expected))
-              #(c, UpdatedField(e.item))
-            }
-            None -> Ok(#(c, UnchangedField(expected)))
-          })
-          #(c, [result, ..fields])
-        }),
-      )
-      let positional_fields = list.reverse(positional_fields)
+      let positional_fields =
+        list.map2(matched, constructor_args, fn(m, expected) {
+          case m {
+            Some(value) -> UpdatedField(value)
+            None -> UnchangedField(expected)
+          }
+        })
 
       // The result type is the same as the constructor type
       let typ = constructor_ret
@@ -2456,7 +2568,7 @@ fn infer_expression(
           positional_fields: positional_fields,
         )
 
-      #(c, record_update)
+      Ok(#(c, record_update))
     }
     g.FieldAccess(location:, container:, label:) -> {
       let field_access = {
@@ -2531,18 +2643,17 @@ fn infer_expression(
         }
       }
     }
-    g.Call(span, function, arguments) -> {
-      use #(c, call) <- result.map(infer_call(c, n, span, function, arguments))
-      #(
-        c,
+    g.Call(span, function, args) -> {
+      use #(c, call) <- result.map(infer_call(c, n, span, function, args, None))
+      let call =
         Call(
           call.typ,
           call.location,
           call.function,
           call.arguments,
           call.positional_arguments,
-        ),
-      )
+        )
+      #(c, call)
     }
     g.TupleIndex(location:, tuple:, index:) -> {
       use #(c, tuple) <- result.try(infer_expression(c, n, tuple))
@@ -2717,25 +2828,19 @@ fn infer_expression(
       Ok(#(c, Case(typ:, location:, subjects:, clauses:)))
     }
     g.BinaryOperator(span, g.Pipe, left, right) -> {
-      // first infer a desugared version of the pipe
-      let #(idx, label, desugared) = case right {
-        g.Call(span, fun, args) -> {
-          #(
-            0,
-            None,
-            infer_call(c, n, span, fun, [g.UnlabelledField(left), ..args]),
-          )
-        }
+      // first desugar the pipe
+      let #(idx, label, span, fun, args) = case right {
+        g.Call(span, fun, args) -> #(0, None, span, fun, [
+          g.UnlabelledField(left),
+          ..args
+        ])
         g.FnCapture(span, label, fun, before, after) -> {
-          let args = case label {
-            Some(label) -> [before, [g.LabelledField(label, span, left)], after]
-            None -> [before, [g.UnlabelledField(left)], after]
+          let arg = case label {
+            Some(label) -> g.LabelledField(label, span, left)
+            None -> g.UnlabelledField(left)
           }
-          #(
-            list.length(before),
-            label,
-            infer_call(c, n, span, fun, list.flatten(args)),
-          )
+          let args = list.flatten([before, [arg], after])
+          #(list.length(before), label, span, fun, args)
         }
         g.Echo(location: span, expression: None, message:) -> {
           let echo_ =
@@ -2746,14 +2851,12 @@ fn infer_expression(
                 message,
               )),
             ])
-          #(0, None, infer_call(c, n, span, echo_, [g.UnlabelledField(left)]))
+          #(0, None, span, echo_, [g.UnlabelledField(left)])
         }
-        _ -> {
-          #(0, None, infer_call(c, n, span, right, [g.UnlabelledField(left)]))
-        }
+        _ -> #(0, None, span, right, [g.UnlabelledField(left)])
       }
-      // then re-sugar it
-      use #(c, desugared) <- result.map(desugared)
+      // then infer and re-sugar the result
+      use #(c, desugared) <- result.map(infer_call(c, n, span, fun, args, None))
       let InferredCall(
         typ:,
         location:,
@@ -2776,7 +2879,9 @@ fn infer_expression(
       let name = map_binop(name)
       let #(c, fun_typ) = case name {
         // Boolean logic
-        And | Or -> #(c, FunctionType([bool_type, bool_type], bool_type))
+        And | Or -> {
+          #(c, FunctionType([bool_type, bool_type], bool_type))
+        }
 
         // Equality
         Eq | NotEq -> {
@@ -2785,32 +2890,27 @@ fn infer_expression(
         }
 
         // Order comparison
-        LtInt | LtEqInt | GtEqInt | GtInt -> #(
-          c,
-          FunctionType([int_type, int_type], bool_type),
-        )
+        LtInt | LtEqInt | GtEqInt | GtInt -> {
+          #(c, FunctionType([int_type, int_type], bool_type))
+        }
 
-        LtFloat | LtEqFloat | GtEqFloat | GtFloat -> #(
-          c,
-          FunctionType([float_type, float_type], bool_type),
-        )
+        LtFloat | LtEqFloat | GtEqFloat | GtFloat -> {
+          #(c, FunctionType([float_type, float_type], bool_type))
+        }
 
         // Maths
-        AddInt | SubInt | MultInt | DivInt | RemainderInt -> #(
-          c,
-          FunctionType([int_type, int_type], int_type),
-        )
+        AddInt | SubInt | MultInt | DivInt | RemainderInt -> {
+          #(c, FunctionType([int_type, int_type], int_type))
+        }
 
-        AddFloat | SubFloat | MultFloat | DivFloat -> #(
-          c,
-          FunctionType([float_type, float_type], float_type),
-        )
+        AddFloat | SubFloat | MultFloat | DivFloat -> {
+          #(c, FunctionType([float_type, float_type], float_type))
+        }
 
         // Strings
-        Concatenate -> #(
-          c,
-          FunctionType([string_type, string_type], string_type),
-        )
+        Concatenate -> {
+          #(c, FunctionType([string_type, string_type], string_type))
+        }
       }
 
       use #(c, left) <- result.try(infer_expression(c, n, left))
@@ -2857,13 +2957,22 @@ type InferredCall {
   )
 }
 
+/// Infer a function call with the given arguments.
+/// `callback` is the implicit trailing argument of a `use` statement.
 fn infer_call(
   c: Context,
   n: LocalEnv,
   span: Span,
   function: g.Expression,
   arguments: List(g.Field(g.Expression)),
+  callback: Option(g.Expression),
 ) -> Result(#(Context, InferredCall), Error) {
+  use _ <- result.try(check_arg_order(c, arguments, fn(e) { e.location }))
+  let arguments = case callback {
+    Some(callback) -> list.append(arguments, [g.UnlabelledField(callback)])
+    None -> arguments
+  }
+
   // infer the type of the function
   use #(c, fun) <- result.try(infer_expression(c, n, function))
 
@@ -2874,16 +2983,7 @@ fn infer_call(
   }
 
   // convert glance fields to typed fields (original order)
-  let args =
-    list.map(arguments, fn(arg) {
-      case arg {
-        g.LabelledField(label:, label_location:, item:) ->
-          LabelledField(item, label, label_location)
-        g.ShorthandField(label:, location:) ->
-          ShorthandField(g.Variable(location, label), label, location)
-        g.UnlabelledField(item:) -> UnlabelledField(item)
-      }
-    })
+  let args = list.map(arguments, convert_field(_, g.Variable))
 
   // build type hints by label/position for Fn arg inference
   let #(c, fun_typ_resolved) = resolve_type(c, fun.typ)
@@ -2917,15 +3017,17 @@ fn infer_call(
   let arguments = list.reverse(arguments)
 
   // reorder to positional order via label matching
-  use positional_fields <- result.try(match_labels(c, arguments, labels))
+  use positional_fields <- result.try(
+    match_fields(arguments, labels)
+    |> result.map_error(match_error(c, labels, arguments, _)),
+  )
 
-  let arg_types = list.map(positional_fields, fn(f) { f.item.typ })
-  let positional_arguments = list.map(positional_fields, fn(f) { f.item })
+  let arg_types = list.map(positional_fields, fn(expr) { expr.typ })
 
   // unify the function type with the types of args
   let #(c, typ) = new_type_var_ref(c)
   use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
-  #(c, InferredCall(typ, span, fun, arguments, positional_arguments))
+  #(c, InferredCall(typ, span, fun, arguments, positional_fields))
 }
 
 fn map_binop(name: g.BinaryOperator) -> BinaryOperator {
@@ -3906,7 +4008,11 @@ fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
 }
 
 fn context_location(c: Context) {
-  Location(c.module.name, c.current_definition, c.current_span)
+  span_location(c, c.current_span)
+}
+
+fn span_location(c: Context, span: Span) -> Location {
+  Location(c.module.name, c.current_definition, span)
 }
 
 fn warn(c: Context, warning: Warning) -> Context {
@@ -3933,23 +4039,5 @@ fn map_bit_string_segment_option(
   case option {
     SizeValueOption(expr) -> SizeValueOption(func(expr))
     _ -> option
-  }
-}
-
-fn extract_matching(
-  in list: List(a),
-  one_that is_desired: fn(a) -> Bool,
-) -> Result(#(a, List(a)), Nil) {
-  extract_matching_loop(list, is_desired, [])
-}
-
-fn extract_matching_loop(haystack, predicate, checked) {
-  case haystack {
-    [] -> Error(Nil)
-    [first, ..rest] ->
-      case predicate(first) {
-        True -> Ok(#(first, list.append(list.reverse(checked), rest)))
-        False -> extract_matching_loop(rest, predicate, [first, ..checked])
-      }
   }
 }

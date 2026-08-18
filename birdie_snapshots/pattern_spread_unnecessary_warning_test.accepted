@@ -1,0 +1,67 @@
+---
+version: 1.5.4
+title: pattern spread unnecessary warning test
+file: ./test/glance_typed_test.gleam
+test_name: pattern_spread_unnecessary_warning_test
+---
+---
+name: test
+types:
+- name: Point
+  type: "() test.Point"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Point
+    type: "() fn(gleam.Int, gleam.Int) -> test.Point"
+    fields:
+    - label: x
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+    - label: y
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+functions:
+- name: f
+  type: "() fn(test.Point) -> gleam.Int"
+  publicity: public
+  parameters:
+  - type: "test.Point"
+    name: p
+    annotation:
+      annotation: Point
+      type: "test.Point"
+  body:
+  - kind: assignment
+    type: "test.Point"
+    assignment_kind: let
+    pattern:
+      kind: constructor_pattern
+      type: "test.Point"
+      constructor: Point
+      with_spread: true
+      positional_arguments:
+      - kind: int_pattern
+        type: "gleam.Int"
+        value: "1"
+      - kind: int_pattern
+        type: "gleam.Int"
+        value: "2"
+      resolved_module: test
+    value:
+      kind: local_variable
+      type: "test.Point"
+      name: p
+  - kind: int_literal
+    type: "gleam.Int"
+    value: "1"
+warnings:
+- kind: unnecessary_spread
+  field_count: 2
+  location:
+    module: test
+    definition: f
+    span: "106-107"
+

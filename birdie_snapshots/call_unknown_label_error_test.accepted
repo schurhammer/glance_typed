@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: call unknown label error test
+file: ./test/glance_typed_test.gleam
+test_name: call_unknown_label_error_test
+---
+'zzz' is not a valid label

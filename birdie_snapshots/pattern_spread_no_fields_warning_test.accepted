@@ -1,0 +1,51 @@
+---
+version: 1.5.4
+title: pattern spread no fields warning test
+file: ./test/glance_typed_test.gleam
+test_name: pattern_spread_no_fields_warning_test
+---
+---
+name: test
+types:
+- name: Empty
+  type: "() test.Empty"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Empty
+    type: "() test.Empty"
+functions:
+- name: f
+  type: "() fn(test.Empty) -> gleam.Int"
+  publicity: public
+  parameters:
+  - type: "test.Empty"
+    name: e
+    annotation:
+      annotation: Empty
+      type: "test.Empty"
+  body:
+  - kind: assignment
+    type: "test.Empty"
+    assignment_kind: let
+    pattern:
+      kind: constructor_pattern
+      type: "test.Empty"
+      constructor: Empty
+      with_spread: true
+      resolved_module: test
+    value:
+      kind: local_variable
+      type: "test.Empty"
+      name: e
+  - kind: int_literal
+    type: "gleam.Int"
+    value: "1"
+warnings:
+- kind: unnecessary_spread
+  field_count: 0
+  location:
+    module: test
+    definition: f
+    span: "78-79"
+
