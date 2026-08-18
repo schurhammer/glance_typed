@@ -160,7 +160,7 @@ pub type Pattern {
   PatternBitString(
     typ: Type,
     location: Span,
-    segments: List(#(Pattern, List(BitStringSegmentOption(Pattern)))),
+    segments: List(#(Pattern, List(BitStringSegmentOption(BitArraySize)))),
   )
   PatternVariant(
     typ: Type,
@@ -332,6 +332,26 @@ pub type Clause {
     guard: Option(Expression),
     body: Expression,
   )
+}
+
+pub type BitArraySize {
+  BitArraySizeInt(location: Span, value: String)
+  BitArraySizeVariable(location: Span, name: String)
+  BitArraySizeBinaryOperator(
+    location: Span,
+    operator: BitArraySizeOperator,
+    left: BitArraySize,
+    right: BitArraySize,
+  )
+  BitArraySizeBlock(location: Span, inner: BitArraySize)
+}
+
+pub type BitArraySizeOperator {
+  BitArraySizeAdd
+  BitArraySizeSubtract
+  BitArraySizeMultiply
+  BitArraySizeDivide
+  BitArraySizeRemainder
 }
 
 pub type BitStringSegmentOption(t) {
@@ -1785,6 +1805,47 @@ fn convert_unqualified_import(imp: g.UnqualifiedImport) -> UnqualifiedImport {
   UnqualifiedImport(imp.name, imp.alias)
 }
 
+/// Check that the bit array size expression only references int values.
+fn infer_bit_array_size(
+  c: Context,
+  n: LocalEnv,
+  size: g.BitArraySize,
+) -> Result(#(Context, BitArraySize), Error) {
+  case size {
+    g.BitArraySizeInt(location:, value:) ->
+      Ok(#(c, BitArraySizeInt(location, value)))
+    g.BitArraySizeVariable(location:, name:) -> {
+      let c = Context(..c, current_span: location)
+      use c <- result.try(case resolve_unqualified_name(c, n, name) {
+        Ok(ResolvedLocal(_, typ)) -> unify(c, typ, int_type)
+        Ok(ResolvedModuleValue(ModuleConstant(_, _, poly)))
+        | Ok(ResolvedModuleValue(ModuleFunction(_, _, poly, _))) -> {
+          let #(c, typ) = instantiate(c, poly)
+          unify(c, typ, int_type)
+        }
+        Error(e) -> Error(e)
+      })
+      Ok(#(c, BitArraySizeVariable(location, name)))
+    }
+    g.BitArraySizeBinaryOperator(location:, operator:, left:, right:) -> {
+      use #(c, left) <- result.try(infer_bit_array_size(c, n, left))
+      use #(c, right) <- result.map(infer_bit_array_size(c, n, right))
+      let operator = case operator {
+        g.BitArraySizeAdd -> BitArraySizeAdd
+        g.BitArraySizeSubtract -> BitArraySizeSubtract
+        g.BitArraySizeMultiply -> BitArraySizeMultiply
+        g.BitArraySizeDivide -> BitArraySizeDivide
+        g.BitArraySizeRemainder -> BitArraySizeRemainder
+      }
+      #(c, BitArraySizeBinaryOperator(location, operator, left, right))
+    }
+    g.BitArraySizeBlock(location:, inner:) -> {
+      use #(c, inner) <- result.map(infer_bit_array_size(c, n, inner))
+      #(c, BitArraySizeBlock(location, inner))
+    }
+  }
+}
+
 fn infer_pattern(
   c: Context,
   n: LocalEnv,
@@ -1930,10 +1991,9 @@ fn infer_pattern(
                 g.Utf32CodepointOption ->
                   Ok(#(c, n, Utf32CodepointOption, Some(codepoint_type)))
                 g.SizeOption(size) -> Ok(#(c, n, SizeOption(size), None))
-                g.SizeValueOption(pattern) -> {
-                  use #(c, n, p) <- result.try(infer_pattern(c, n, pattern))
-                  use c <- result.map(unify(c, p.typ, int_type))
-                  #(c, n, SizeValueOption(p), None)
+                g.SizeValueOption(size) -> {
+                  use #(c, size) <- result.map(infer_bit_array_size(c, n, size))
+                  #(c, n, SizeValueOption(size), None)
                 }
                 g.UnitOption(unit) -> Ok(#(c, n, UnitOption(unit), None))
               })
@@ -3490,37 +3550,14 @@ fn substitute_function(c: Context, function: FunctionDefinition) {
   FunctionDefinition(
     ..function,
     typ: substitute_poly(c, rename, function.typ),
-    parameters: list.map(function.parameters, substitute_function_parameter(
-      c,
-      rename,
-      _,
-    )),
+    parameters: list.map(function.parameters, fn(param) {
+      let typ = substitute_type(c, rename, param.typ)
+      let annotation =
+        option.map(param.annotation, substitute_annotation(c, rename, _))
+      FunctionParameter(..param, typ:, annotation:)
+    }),
     body: list.map(function.body, substitute_statement(c, rename, _)),
     return: option.map(function.return, substitute_annotation(c, rename, _)),
-  )
-}
-
-fn substitute_function_parameter(
-  c: Context,
-  rename: Dict(TypeVarId, TypeVarId),
-  param: FunctionParameter,
-) -> FunctionParameter {
-  FunctionParameter(
-    ..param,
-    typ: substitute_type(c, rename, param.typ),
-    annotation: option.map(param.annotation, substitute_annotation(c, rename, _)),
-  )
-}
-
-fn substitute_fn_parameter(
-  c: Context,
-  rename: Dict(TypeVarId, TypeVarId),
-  param: FnParameter,
-) -> FnParameter {
-  FnParameter(
-    ..param,
-    typ: substitute_type(c, rename, param.typ),
-    annotation: option.map(param.annotation, substitute_annotation(c, rename, _)),
   )
 }
 
@@ -3657,7 +3694,12 @@ fn substitute_expression(
       Fn(
         typ: substitute_type(c, rename, typ),
         location:,
-        parameters: list.map(parameters, substitute_fn_parameter(c, rename, _)),
+        parameters: list.map(parameters, fn(param) {
+          let typ = substitute_type(c, rename, param.typ)
+          let annotation =
+            option.map(param.annotation, substitute_annotation(c, rename, _))
+          FnParameter(..param, typ:, annotation:)
+        }),
         return_annotation: option.map(return_annotation, substitute_annotation(
           c,
           rename,
@@ -3767,14 +3809,13 @@ fn substitute_expression(
           let #(expr, options) = segment
           #(
             substitute_expression(c, rename, expr),
-            list.map(
-              options,
-              map_bit_string_segment_option(_, substitute_expression(
-                c,
-                rename,
-                _,
-              )),
-            ),
+            list.map(options, fn(option) {
+              case option {
+                SizeValueOption(size) ->
+                  SizeValueOption(substitute_expression(c, rename, size))
+                _ -> option
+              }
+            }),
           )
         }),
       )
@@ -3890,13 +3931,7 @@ fn substitute_pattern(
         location:,
         segments: list.map(segments, fn(segment) {
           let #(pattern, options) = segment
-          #(
-            substitute_pattern(c, rename, pattern),
-            list.map(
-              options,
-              map_bit_string_segment_option(_, substitute_pattern(c, rename, _)),
-            ),
-          )
+          #(substitute_pattern(c, rename, pattern), options)
         }),
       )
     PatternVariant(
@@ -4173,14 +4208,4 @@ fn implicit_todo(
   let todo_exp = Todo(typ, location.span, None)
   let c = warn(c, ImplicitTodo(location, kind))
   #(c, Expression(typ, location.span, todo_exp))
-}
-
-fn map_bit_string_segment_option(
-  option: BitStringSegmentOption(a),
-  func: fn(a) -> a,
-) -> BitStringSegmentOption(a) {
-  case option {
-    SizeValueOption(expr) -> SizeValueOption(func(expr))
-    _ -> option
-  }
 }

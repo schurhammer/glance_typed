@@ -14,9 +14,9 @@ version = "1.0.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
-glance = ">= 6.0.0 and < 7.0.0"
-cymbal = ">= 1.0.1 and < 2.0.0"
-birdie = ">= 1.5.4 and < 2.0.0"
+glance = ">= 7.0.0 and < 8.0.0"
 
 [dev-dependencies]
+cymbal = ">= 1.0.1 and < 2.0.0"
+birdie = ">= 2.0.2 and < 3.0.0"
 gleeunit = ">= 1.0.0 and < 2.0.0"

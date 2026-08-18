@@ -650,7 +650,7 @@ fn pattern_to_yaml(pattern: typed.Pattern) -> cymbal.Yaml {
                 "options",
                 yaml_list(segment.1, bit_string_segment_option_to_yaml(
                   _,
-                  pattern_to_yaml,
+                  bit_array_size_to_yaml,
                 )),
               ),
             ])
@@ -830,6 +830,35 @@ fn unqualified_import_to_yaml(
     ]
     |> option.values,
   )
+}
+
+fn bit_array_size_to_yaml(size: typed.BitArraySize) -> cymbal.Yaml {
+  case size {
+    typed.BitArraySizeInt(value:, ..) ->
+      yaml_block([#("size_int", cymbal.string(value))])
+    typed.BitArraySizeVariable(name:, ..) ->
+      yaml_block([#("size_variable", cymbal.string(name))])
+    typed.BitArraySizeBinaryOperator(operator:, left:, right:, ..) ->
+      yaml_block([
+        #("size_operator", bit_array_size_operator_to_yaml(operator)),
+        #("left", bit_array_size_to_yaml(left)),
+        #("right", bit_array_size_to_yaml(right)),
+      ])
+    typed.BitArraySizeBlock(inner:, ..) ->
+      yaml_block([#("size_block", bit_array_size_to_yaml(inner))])
+  }
+}
+
+fn bit_array_size_operator_to_yaml(
+  operator: typed.BitArraySizeOperator,
+) -> cymbal.Yaml {
+  case operator {
+    typed.BitArraySizeAdd -> cymbal.string("add")
+    typed.BitArraySizeSubtract -> cymbal.string("subtract")
+    typed.BitArraySizeMultiply -> cymbal.string("multiply")
+    typed.BitArraySizeDivide -> cymbal.string("divide")
+    typed.BitArraySizeRemainder -> cymbal.string("remainder")
+  }
 }
 
 fn bit_string_segment_option_to_yaml(
