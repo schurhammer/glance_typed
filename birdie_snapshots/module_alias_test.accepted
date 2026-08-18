@@ -6,6 +6,9 @@ test_name: module_alias_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/option"
+  alias: opt
 functions:
 - name: wrap
   type: "() fn(gleam.Int) -> gleam/option.Option(gleam.Int)"

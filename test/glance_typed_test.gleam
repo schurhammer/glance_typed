@@ -1579,6 +1579,26 @@ pub fn use_imported_constant_test() {
   |> birdie.snap(title: "use imported constant test")
 }
 
+pub fn module_records_its_imports_test() {
+  let deps =
+    dict.from_list([
+      #("gleam", typed.interface(typed.prelude_module())),
+      #("mymod", infer_interface(dict.new(), "pub const answer = 42", "mymod")),
+    ])
+  infer_with(
+    deps,
+    "
+    import mymod
+    import mymod as aliased
+
+    pub fn f() { mymod.answer }
+    ",
+    "example",
+  )
+  |> glance_typed_yaml.module_to_string
+  |> birdie.snap(title: "module records its imports test")
+}
+
 pub fn let_assert_message_is_substituted_test() {
   let module =
     infer_with_prelude(

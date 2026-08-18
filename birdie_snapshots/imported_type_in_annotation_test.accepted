@@ -6,6 +6,10 @@ test_name: imported_type_in_annotation_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/option"
+  unqualified_types:
+  - name: Option
 functions:
 - name: wrap
   type: "() fn(gleam.Int) -> gleam/option.Option(gleam.Int)"

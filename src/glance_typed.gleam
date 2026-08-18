@@ -560,8 +560,8 @@ pub fn infer_module(
 
   // handle module imports
   use c <- result.try(
-    list.try_fold(module.imports, c, fn(c, imp) {
-      let imp = imp.definition
+    list.try_fold(module.imports, c, fn(c, def) {
+      let imp = def.definition
       let module_id = imp.module
 
       let module_aliases = case imp.alias {
@@ -592,7 +592,7 @@ pub fn infer_module(
         }),
       )
 
-      use value_env <- result.map(
+      use value_env <- result.try(
         list.try_fold(imp.unqualified_values, c.value_env, fn(acc, imp) {
           use value <- result.map(resolve_global_name(c, module_id, imp.name))
           let alias = case imp.alias {
@@ -603,7 +603,27 @@ pub fn infer_module(
         }),
       )
 
-      Context(..c, module_aliases:, type_env:, value_env:)
+      use attributes <- result.map(infer_attributes(c, def.attributes))
+      let typed_import =
+        Definition(
+          attributes,
+          Import(
+            location: imp.location,
+            module: module_id,
+            alias: option.map(imp.alias, convert_assignment_name),
+            unqualified_types: list.map(
+              imp.unqualified_types,
+              convert_unqualified_import,
+            ),
+            unqualified_values: list.map(
+              imp.unqualified_values,
+              convert_unqualified_import,
+            ),
+          ),
+        )
+      let module =
+        Module(..c.module, imports: [typed_import, ..c.module.imports])
+      Context(..c, module_aliases:, type_env:, value_env:, module:)
     }),
   )
 
@@ -1691,6 +1711,10 @@ fn convert_assignment_name(name: g.AssignmentName) -> AssignmentName {
     g.Named(s) -> Named(s)
     g.Discarded(s) -> Discarded(s)
   }
+}
+
+fn convert_unqualified_import(imp: g.UnqualifiedImport) -> UnqualifiedImport {
+  UnqualifiedImport(imp.name, imp.alias)
 }
 
 fn infer_pattern(

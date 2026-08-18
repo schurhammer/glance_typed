@@ -6,6 +6,10 @@ test_name: imported_type_alias_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/option"
+  unqualified_types:
+  - name: Option
 type_aliases:
 - name: OptionalInt
   type: "() gleam/option.Option(gleam.Int)"

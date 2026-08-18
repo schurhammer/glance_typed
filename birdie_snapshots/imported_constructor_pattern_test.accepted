@@ -6,6 +6,11 @@ test_name: imported_constructor_pattern_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/option"
+  unqualified_values:
+  - name: Some
+  - name: None
 functions:
 - name: optional_double
   type: "() fn(gleam/option.Option(gleam.Int)) -> gleam/option.Option(gleam.Int)"

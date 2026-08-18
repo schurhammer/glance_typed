@@ -1,13 +1,15 @@
 ---
 version: 1.5.4
-title: use imported constant test
+title: module records its imports test
 file: ./test/glance_typed_test.gleam
-test_name: use_imported_constant_test
+test_name: module_records_its_imports_test
 ---
 ---
 name: example
 imports:
 - module: mymod
+- module: mymod
+  alias: aliased
 functions:
 - name: f
   type: "() fn() -> gleam.Int"

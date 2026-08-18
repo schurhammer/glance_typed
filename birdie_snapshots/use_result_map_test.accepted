@@ -6,6 +6,8 @@ test_name: use_result_map_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/result"
 functions:
 - name: example
   type: "() fn(gleam.Result(gleam.Int, gleam.String)) -> gleam.Result(gleam.Int, gleam.String)"

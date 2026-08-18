@@ -6,6 +6,8 @@ test_name: imported_function_call_test
 ---
 ---
 name: example
+imports:
+- module: "gleam/option"
 functions:
 - name: optional_square
   type: "() fn(gleam/option.Option(gleam.Int)) -> gleam/option.Option(gleam.Int)"
