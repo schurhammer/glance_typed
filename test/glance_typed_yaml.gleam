@@ -50,6 +50,12 @@ fn warning_to_yaml(warning: typed.Warning) -> cymbal.Yaml {
         #("field_count", cymbal.int(field_count)),
         #("location", location_to_yaml(location)),
       ])
+    typed.ShadowsImport(location:, name:) ->
+      yaml_block([
+        #("kind", cymbal.string("shadows_import")),
+        #("name", cymbal.string(name)),
+        #("location", location_to_yaml(location)),
+      ])
   }
 }
 

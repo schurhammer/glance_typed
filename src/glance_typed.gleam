@@ -485,7 +485,9 @@ pub type Error {
   UnresolvedModule(location: Location, name: String)
   UnresolvedModuleValue(location: Location, name: String)
   UnresolvedType(location: Location, name: String)
-  UnresolvedFunction(location: Location, name: String)
+  DuplicateFunction(location: Location, name: String)
+  DuplicateConstant(location: Location, name: String)
+  DuplicateType(location: Location, name: String)
   InvalidTupleAccess(location: Location)
   InvalidFieldAccess(location: Location)
   FieldNotFound(location: Location, name: String)
@@ -518,6 +520,8 @@ pub type Warning {
   UnnecessarySpread(location: Location, field_count: Int)
   /// An unnecessarry record update, either nothing updated or everything updated.
   UnnecessaryRecordUpdate(location: Location, field_count: Int)
+  /// A function or constant has the same name as an unqualified import.
+  ShadowsImport(location: Location, name: String)
 }
 
 type QualifiedName {
@@ -532,6 +536,11 @@ pub type ModuleValue {
     labels: List(Option(String)),
   )
   ModuleConstant(module: String, name: String, typ: Poly)
+}
+
+type Origin {
+  Local
+  Imported
 }
 
 type ResolvedVariable {
@@ -549,7 +558,9 @@ type Context {
     temp_uid: Int,
     module_aliases: Dict(String, String),
     type_env: Dict(QualifiedName, #(Poly, List(Variant))),
+    type_origin: Dict(QualifiedName, Origin),
     value_env: Dict(QualifiedName, ModuleValue),
+    value_origin: Dict(QualifiedName, Origin),
   )
 }
 
@@ -592,30 +603,44 @@ pub fn infer_module(
         }
       }
 
-      use type_env <- result.try(
-        list.try_fold(imp.unqualified_types, c.type_env, fn(acc, imp) {
-          let resolved = lookup_module_type(c, module_id, imp.name)
-          use #(poly, variants) <- result.map(resolved)
-          let alias = case imp.alias {
-            Some(alias) -> alias
-            None -> imp.name
-          }
-          let name = QualifiedName(c.module.name, alias)
-          dict.insert(acc, name, #(poly, variants))
-        }),
+      use #(type_env, type_origin) <- result.try(
+        list.try_fold(
+          imp.unqualified_types,
+          #(c.type_env, c.type_origin),
+          fn(acc, imp) {
+            let #(type_env, type_origin) = acc
+            let resolved = lookup_module_type(c, module_id, imp.name)
+            use #(poly, variants) <- result.map(resolved)
+            let alias = case imp.alias {
+              Some(alias) -> alias
+              None -> imp.name
+            }
+            let name = QualifiedName(c.module.name, alias)
+            let type_env = dict.insert(type_env, name, #(poly, variants))
+            let type_origin = dict.insert(type_origin, name, Imported)
+            #(type_env, type_origin)
+          },
+        ),
       )
 
-      use value_env <- result.try(
-        list.try_fold(imp.unqualified_values, c.value_env, fn(acc, imp) {
-          let resolved = lookup_module_value(c, module_id, imp.name)
-          use value <- result.map(resolved)
-          let alias = case imp.alias {
-            Some(alias) -> alias
-            None -> imp.name
-          }
-          let name = QualifiedName(c.module.name, alias)
-          dict.insert(acc, name, value)
-        }),
+      use #(value_env, value_origin) <- result.try(
+        list.try_fold(
+          imp.unqualified_values,
+          #(c.value_env, c.value_origin),
+          fn(acc, imp) {
+            let #(value_env, value_origin) = acc
+            let resolved = lookup_module_value(c, module_id, imp.name)
+            use value <- result.map(resolved)
+            let alias = case imp.alias {
+              Some(alias) -> alias
+              None -> imp.name
+            }
+            let name = QualifiedName(c.module.name, alias)
+            let value_env = dict.insert(value_env, name, value)
+            let value_origin = dict.insert(value_origin, name, Imported)
+            #(value_env, value_origin)
+          },
+        ),
       )
 
       use attributes <- result.map(infer_attributes(c, def.attributes))
@@ -638,16 +663,26 @@ pub fn infer_module(
         )
       let module =
         Module(..c.module, imports: [typed_import, ..c.module.imports])
-      Context(..c, module_aliases:, type_env:, value_env:, module:)
+      Context(
+        ..c,
+        module_aliases:,
+        type_env:,
+        type_origin:,
+        value_env:,
+        value_origin:,
+        module:,
+      )
     }),
   )
 
   // add types to env so they can reference eachother (but not yet constructors)
-  let c =
-    list.fold(module.custom_types, c, fn(c, def) {
+  use c <- result.try(
+    list.try_fold(module.custom_types, c, fn(c, def) {
       let custom = def.definition
       let c = Context(..c, current_definition: custom.name)
       let c = Context(..c, current_span: def.definition.location)
+
+      use c <- result.map(claim_type_name(c, custom.name, context_location(c)))
 
       let #(c, parameters) =
         list.fold(custom.parameters, #(c, []), fn(acc, p) {
@@ -661,14 +696,19 @@ pub fn infer_module(
       let typ = generalise(c, typ)
 
       register_type(c, def.definition.name, typ, [])
-    })
+    }),
+  )
 
   // add types aliases to env so they can reference eachother
-  let c =
-    list.fold(module.type_aliases, c, fn(c, def) {
+  use c <- result.try(
+    list.try_fold(module.type_aliases, c, fn(c, def) {
+      let alias = def.definition
+      let location = span_location(c, alias.location)
+      use c <- result.map(claim_type_name(c, alias.name, location))
       let #(c, typ) = new_type_var_ref(c)
-      register_type(c, def.definition.name, Poly([], typ), [])
-    })
+      register_type(c, alias.name, Poly([], typ), [])
+    }),
+  )
 
   // infer type aliases fr fr
   use #(c, aliases) <- result.try(
@@ -700,6 +740,7 @@ pub fn infer_module(
       // create alias entry
       let poly = generalise(c, alias.aliased.typ)
       let c = register_type(c, alias.name, poly, [])
+      let alias = TypeAlias(..alias, typ: poly)
       use attrs <- result.map(infer_attributes(c, def.attributes))
       let def = Definition(attrs, alias)
       update_module(c, fn(mod) {
@@ -736,13 +777,22 @@ pub fn infer_module(
     }),
   )
 
+  use c <- result.try(
+    list.try_fold(module.constants, c, fn(c, def) {
+      let con = def.definition
+      let location = span_location(c, con.location)
+      claim_value_name(c, con.name, location, DuplicateConstant)
+    }),
+  )
+
   let constants =
     call_graph.constant_graph(module)
     |> graph.strongly_connected_components()
     |> list.flatten()
-    |> list.filter_map(fn(name) {
-      module.constants
-      |> list.find(fn(c) { c.definition.name == name })
+    |> list.map(fn(name) {
+      let assert Ok(def) =
+        list.find(module.constants, fn(def) { def.definition.name == name })
+      def
     })
 
   // add functions to the module value env so they are available for recursion
@@ -750,7 +800,14 @@ pub fn infer_module(
     list.try_fold(module.functions, c, fn(c, def) {
       let fun = def.definition
       let c = Context(..c, current_definition: fun.name)
-      let c = Context(..c, current_span: def.definition.location)
+      let c = Context(..c, current_span: fun.location)
+
+      use c <- result.try(claim_value_name(
+        c,
+        fun.name,
+        context_location(c),
+        DuplicateFunction,
+      ))
 
       // create placeholder function type based on function signature
       use #(c, parameters, return) <- result.map(infer_function_parameters(
@@ -765,16 +822,16 @@ pub fn infer_module(
       let param_labels = list.map(parameters, fn(f) { f.label })
       let typ = FunctionType(param_types, return_type)
 
-      register_function(c, def.definition.name, Poly([], typ), param_labels)
+      register_function(c, fun.name, Poly([], typ), param_labels)
     }),
   )
 
   // infer constant expressions
   use c <- result.try(
     list.try_fold(constants, c, fn(c, def) {
-      use #(c, constant) <- result.try(infer_constant(c, def.definition))
-      let c = Context(..c, current_definition: constant.name)
+      let c = Context(..c, current_definition: def.definition.name)
       let c = Context(..c, current_span: def.definition.location)
+      use #(c, constant) <- result.try(infer_constant(c, def.definition))
 
       let poly = generalise(c, constant.value.typ)
       let c = register_constant(c, constant.name, poly)
@@ -794,16 +851,12 @@ pub fn infer_module(
 
   use c <- result.map(
     list.try_fold(rec_groups, c, fn(c, group) {
-      // find the function definitions by name
-      use group <- result.try(
-        list.try_map(group, fn(fun_name) {
-          list.find(module.functions, fn(f) { f.definition.name == fun_name })
-          |> result.replace_error(UnresolvedFunction(
-            context_location(c),
-            fun_name,
-          ))
-        }),
-      )
+      let group =
+        list.map(group, fn(fun_name) {
+          let assert Ok(def) =
+            list.find(module.functions, fn(f) { f.definition.name == fun_name })
+          def
+        })
 
       // infer types for the group
       use #(c, group) <- result.try(
@@ -862,8 +915,21 @@ pub fn interface(module: Module) -> ModuleInterface {
   ModuleInterface(
     name: module.name,
     imports: list.map(module.imports, fn(i) { i.definition.module }),
-    custom_types: list.map(module.custom_types, fn(t) { t.definition }),
-    type_aliases: list.map(module.type_aliases, fn(t) { t.definition }),
+    custom_types: list.filter_map(module.custom_types, fn(t) {
+      let custom_type = t.definition
+      case custom_type.publicity {
+        Private -> Error(Nil)
+        Public if custom_type.opaque_ ->
+          Ok(CustomType(..custom_type, variants: []))
+        Public -> Ok(custom_type)
+      }
+    }),
+    type_aliases: list.filter_map(module.type_aliases, fn(t) {
+      case t.definition.publicity {
+        Public -> Ok(t.definition)
+        Private -> Error(Nil)
+      }
+    }),
     constants: list.filter(module.constants, fn(c) {
       c.definition.publicity == Public
     })
@@ -927,7 +993,9 @@ fn new_context(module_name: String) -> Context {
     temp_uid: 1,
     module_aliases: dict.new(),
     type_env: dict.new(),
+    type_origin: dict.new(),
     value_env: dict.new(),
+    value_origin: dict.new(),
   )
 }
 
@@ -997,8 +1065,12 @@ pub fn inspect_error(error: Error) {
     UnresolvedModuleValue(name:, ..) ->
       "Module value with name '" <> name <> "' not found"
     UnresolvedType(name:, ..) -> "Type with name '" <> name <> "' not found"
-    UnresolvedFunction(name:, ..) ->
-      "Function with name '" <> name <> "' not found"
+    DuplicateFunction(name:, ..) | DuplicateConstant(name:, ..) ->
+      "The name '"
+      <> name
+      <> "' is already used by another definition in this module"
+    DuplicateType(name:, ..) ->
+      "The name '" <> name <> "' is already used by another type in this module"
     InvalidTupleAccess(..) -> "Attempted tuple access on a non-tuple type"
     InvalidFieldAccess(..) -> "Attempted field access on a non-record type"
     FieldNotFound(name:, ..) ->
@@ -1062,6 +1134,8 @@ pub fn inspect_warning(warning: Warning) {
       "This update sets all "
       <> int.to_string(field_count)
       <> " fields, so `..` has no effect"
+    ShadowsImport(name:, ..) ->
+      "This definition shadows the imported '" <> name <> "'"
   }
 }
 
@@ -1330,6 +1404,13 @@ fn infer_variant(
   typ: Type,
   variant: g.Variant,
 ) -> Result(#(Context, Variant), Error) {
+  use c <- result.try(claim_value_name(
+    c,
+    variant.name,
+    context_location(c),
+    DuplicateFunction,
+  ))
+
   use #(c, fields) <- result.try(
     list.try_fold(variant.fields, #(c, []), fn(acc, field) {
       let #(c, fields) = acc
@@ -3875,7 +3956,14 @@ fn substitute_type(c: Context, rename: Dict(TypeVarId, TypeVarId), typ: Type) {
     VariableType(ref) -> {
       case get_type_var(c, ref) {
         Bound(x) -> substitute_type(c, rename, x)
-        Unbound -> VariableType(dict.get(rename, ref) |> result.unwrap(ref))
+        Unbound ->
+          case dict.get(rename, ref) {
+            Ok(new_ref) -> VariableType(new_ref)
+            Error(Nil) -> {
+              // offset the id so it can't clash with the generalised ids
+              VariableType(TypeVarId(ref.id + dict.size(rename)))
+            }
+          }
       }
     }
   }
@@ -4023,6 +4111,43 @@ fn field_label(field: Field(a)) -> Option(String) {
 
 fn map_definition(def: Definition(a), func: fn(a) -> b) -> Definition(b) {
   Definition(..def, definition: func(def.definition))
+}
+
+/// Claims a name in this module's own value namespace
+fn claim_value_name(
+  c: Context,
+  name: String,
+  location: Location,
+  to_error: fn(Location, String) -> Error,
+) -> Result(Context, Error) {
+  let key = QualifiedName(c.module.name, name)
+  case dict.get(c.value_origin, key) {
+    Ok(Local) -> Error(to_error(location, name))
+    Ok(Imported) -> {
+      let c = warn(c, ShadowsImport(location, name))
+      Ok(Context(..c, value_origin: dict.insert(c.value_origin, key, Local)))
+    }
+    Error(Nil) ->
+      Ok(Context(..c, value_origin: dict.insert(c.value_origin, key, Local)))
+  }
+}
+
+/// Claims a name in this module's own type namespace
+fn claim_type_name(
+  c: Context,
+  name: String,
+  location: Location,
+) -> Result(Context, Error) {
+  let key = QualifiedName(c.module.name, name)
+  case dict.get(c.type_origin, key) {
+    Ok(Local) -> Error(DuplicateType(location, name))
+    Ok(Imported) -> {
+      let c = warn(c, ShadowsImport(location, name))
+      Ok(Context(..c, type_origin: dict.insert(c.type_origin, key, Local)))
+    }
+    Error(Nil) ->
+      Ok(Context(..c, type_origin: dict.insert(c.type_origin, key, Local)))
+  }
 }
 
 fn context_location(c: Context) {

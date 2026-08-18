@@ -1899,3 +1899,171 @@ pub fn wrong_arity_too_few_reports_original_counts_test() {
       ",
     )
 }
+
+pub fn unused_body_var_does_not_collide_with_poly_var_test() {
+  let m =
+    infer(
+      "
+      pub fn first(y) {
+        let _ = []
+        let a = #([], [])
+        let _ = []
+        let b = #([], [])
+        let _ = []
+        #(y, a, b)
+      }
+      ",
+    )
+
+  let assert [typed.Definition(_, typed.FunctionDefinition(typ:, body:, ..))] =
+    m.functions
+  let vars = typ.vars
+
+  let assert [typed.Assignment(pattern: typed.PatternDiscard(typ:, ..), ..), ..] =
+    body
+  let assert typed.NamedType(parameters: [typed.VariableType(discard_var)], ..) =
+    typ
+
+  // the discarded var has semantically no connection to the generalised vars
+  // so it should have a different id
+  assert !list.contains(vars, discard_var)
+}
+
+pub fn duplicate_constant_name_is_an_error_test() {
+  let assert typed.DuplicateConstant(name: "a", ..) =
+    infer_error(
+      "
+      pub const a = 1
+      const a = 2
+      ",
+    )
+}
+
+pub fn self_referencing_constant_still_fails_to_resolve_test() {
+  let assert typed.UnresolvedModuleValue(name: "a", ..) =
+    infer_error("pub const a = a")
+}
+
+pub fn duplicate_function_name_is_an_error_test() {
+  let assert typed.DuplicateFunction(name: "a", ..) =
+    infer_error(
+      "
+      pub fn a() { 1 }
+      fn a() { 2 }
+      ",
+    )
+}
+
+pub fn function_and_constant_sharing_a_name_is_an_error_test() {
+  let assert typed.DuplicateFunction(name: "a", ..) =
+    infer_error(
+      "
+      pub fn a() { 1 }
+      pub const a = fn() { 2 }
+      ",
+    )
+}
+
+pub fn shadowing_an_import_is_a_warning_not_an_error_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import gleam/option.{map}
+
+      pub fn map() { 1 }
+      ",
+    )
+  let assert Ok(m) = typed.infer_module(option_dependencies(), parsed, "test")
+
+  let assert [typed.ShadowsImport(name: "map", ..)] = m.warnings
+  let assert [typed.Definition(_, typed.FunctionDefinition(name: "map", ..))] =
+    m.functions
+}
+
+pub fn constant_shadowing_an_import_is_a_warning_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import gleam/option.{map}
+
+      pub const map = 1
+      ",
+    )
+  let assert Ok(m) = typed.infer_module(option_dependencies(), parsed, "test")
+
+  let assert [typed.ShadowsImport(name: "map", ..)] = m.warnings
+  let assert [typed.Definition(_, typed.ConstantDefinition(name: "map", ..))] =
+    m.constants
+}
+
+pub fn duplicate_variant_name_across_types_is_an_error_test() {
+  let assert typed.DuplicateFunction(name: "A", ..) =
+    infer_error(
+      "
+      pub type Box(a) {
+        A(a)
+      }
+      pub type Bag(a) {
+        A(a)
+      }
+      ",
+    )
+}
+
+pub fn variant_shadowing_an_import_is_a_warning_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import gleam/option.{Some}
+
+      pub type Box {
+        Some(Int)
+      }
+      ",
+    )
+  let assert Ok(m) = typed.infer_module(option_dependencies(), parsed, "test")
+
+  let assert [typed.ShadowsImport(name: "Some", ..)] = m.warnings
+}
+
+pub fn duplicate_custom_type_name_is_an_error_test() {
+  let assert typed.DuplicateType(name: "Box", ..) =
+    infer_error(
+      "
+      pub type Box {
+        A
+      }
+      pub type Box {
+        B
+      }
+      ",
+    )
+}
+
+pub fn custom_type_and_alias_sharing_a_name_is_an_error_test() {
+  let assert typed.DuplicateType(name: "Box", ..) =
+    infer_error(
+      "
+      pub type Box {
+        A
+      }
+      pub type Box = Int
+      ",
+    )
+}
+
+pub fn type_shadowing_an_import_is_a_warning_test() {
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import gleam/option.{type Option}
+
+      pub type Option {
+        A
+      }
+      ",
+    )
+  let assert Ok(m) = typed.infer_module(option_dependencies(), parsed, "test")
+
+  let assert [typed.ShadowsImport(name: "Option", ..)] = m.warnings
+}
