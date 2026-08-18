@@ -4,4 +4,4 @@ title: unknown variable test
 file: ./test/glance_typed_test.gleam
 test_name: unknown_variable_test
 ---
-Global with name 'x' not found
+Module value with name 'x' not found

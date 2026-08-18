@@ -483,7 +483,7 @@ pub type Annotation {
 
 pub type Error {
   UnresolvedModule(location: Location, name: String)
-  UnresolvedGlobal(location: Location, name: String)
+  UnresolvedModuleValue(location: Location, name: String)
   UnresolvedType(location: Location, name: String)
   UnresolvedFunction(location: Location, name: String)
   InvalidTupleAccess(location: Location)
@@ -520,8 +520,23 @@ pub type Warning {
   UnnecessaryRecordUpdate(location: Location, field_count: Int)
 }
 
-type QName {
-  QName(module: String, name: String)
+type QualifiedName {
+  QualifiedName(module: String, name: String)
+}
+
+pub type ModuleValue {
+  ModuleFunction(
+    module: String,
+    name: String,
+    typ: Poly,
+    labels: List(Option(String)),
+  )
+  ModuleConstant(module: String, name: String, typ: Poly)
+}
+
+type ResolvedVariable {
+  ResolvedLocal(name: String, typ: Type)
+  ResolvedModuleValue(module_value: ModuleValue)
 }
 
 type Context {
@@ -533,8 +548,8 @@ type Context {
     type_uid: Int,
     temp_uid: Int,
     module_aliases: Dict(String, String),
-    type_env: Dict(QName, #(Poly, List(Variant))),
-    value_env: Dict(QName, ResolvedGlobal),
+    type_env: Dict(QualifiedName, #(Poly, List(Variant))),
+    value_env: Dict(QualifiedName, ModuleValue),
   )
 }
 
@@ -579,27 +594,27 @@ pub fn infer_module(
 
       use type_env <- result.try(
         list.try_fold(imp.unqualified_types, c.type_env, fn(acc, imp) {
-          use #(_, poly, variants) <- result.map(resolve_global_type_name(
-            c,
-            module_id,
-            imp.name,
-          ))
+          let resolved = lookup_module_type(c, module_id, imp.name)
+          use #(poly, variants) <- result.map(resolved)
           let alias = case imp.alias {
             Some(alias) -> alias
             None -> imp.name
           }
-          dict.insert(acc, QName(c.module.name, alias), #(poly, variants))
+          let name = QualifiedName(c.module.name, alias)
+          dict.insert(acc, name, #(poly, variants))
         }),
       )
 
       use value_env <- result.try(
         list.try_fold(imp.unqualified_values, c.value_env, fn(acc, imp) {
-          use value <- result.map(resolve_global_name(c, module_id, imp.name))
+          let resolved = lookup_module_value(c, module_id, imp.name)
+          use value <- result.map(resolved)
           let alias = case imp.alias {
             Some(alias) -> alias
             None -> imp.name
           }
-          dict.insert(acc, QName(c.module.name, alias), value)
+          let name = QualifiedName(c.module.name, alias)
+          dict.insert(acc, name, value)
         }),
       )
 
@@ -666,11 +681,8 @@ pub fn infer_module(
       use #(c, alias) <- result.try(infer_alias_type(c, def.definition))
 
       // update the placeholder type
-      use #(_, placeholder, _) <- result.try(resolve_global_type_name(
-        c,
-        c.module.name,
-        alias.name,
-      ))
+      let resolved = lookup_module_type(c, c.module.name, alias.name)
+      use #(placeholder, _) <- result.try(resolved)
       use c <- result.map(unify(c, alias.aliased.typ, placeholder.typ))
 
       #(c, [#(def, alias), ..aliases])
@@ -704,11 +716,8 @@ pub fn infer_module(
       let c = Context(..c, current_span: def.definition.location)
 
       // reconstruct the type parameters
-      use #(_, poly, _) <- result.try(resolve_global_type_name(
-        c,
-        c.module.name,
-        custom.name,
-      ))
+      let resolved = lookup_module_type(c, c.module.name, custom.name)
+      use #(poly, _) <- result.try(resolved)
       let param_types = list.map(poly.vars, fn(x) { VariableType(x) })
       let parameters = list.zip(custom.parameters, param_types)
 
@@ -736,7 +745,7 @@ pub fn infer_module(
       |> list.find(fn(c) { c.definition.name == name })
     })
 
-  // add functions to global env so they are available for recursion
+  // add functions to the module value env so they are available for recursion
   use c <- result.try(
     list.try_fold(module.functions, c, fn(c, def) {
       let fun = def.definition
@@ -817,11 +826,8 @@ pub fn infer_module(
         let fun = def.definition
 
         // unify placeholder type
-        use placeholder <- result.try(resolve_global_name(
-          c,
-          c.module.name,
-          fun.name,
-        ))
+        let resolved = lookup_module_value(c, c.module.name, fun.name)
+        use placeholder <- result.try(resolved)
         use c <- result.map(unify(c, placeholder.typ.typ, fun.typ.typ))
 
         // generalise
@@ -986,11 +992,10 @@ fn use_parameter_name(index: Int) -> String {
 /// Returns a human-readable string description of the error.
 /// Does not include the span (location) of the error.
 pub fn inspect_error(error: Error) {
-  // TODO I think we actually can't tell the difference between unresolved
-  // module and unresolved global (and maybe others?). Should we merge the errors?
   case error {
     UnresolvedModule(name:, ..) -> "Module with name '" <> name <> "' not found"
-    UnresolvedGlobal(name:, ..) -> "Global with name '" <> name <> "' not found"
+    UnresolvedModuleValue(name:, ..) ->
+      "Module value with name '" <> name <> "' not found"
     UnresolvedType(name:, ..) -> "Type with name '" <> name <> "' not found"
     UnresolvedFunction(name:, ..) ->
       "Function with name '" <> name <> "' not found"
@@ -1084,8 +1089,8 @@ fn register_function(
   let value_env =
     dict.insert(
       c.value_env,
-      QName(c.module.name, name),
-      FunctionGlobal(c.module.name, name, typ, labels),
+      QualifiedName(c.module.name, name),
+      ModuleFunction(c.module.name, name, typ, labels),
     )
   Context(..c, value_env:)
 }
@@ -1094,8 +1099,8 @@ fn register_constant(c: Context, name: String, typ: Poly) -> Context {
   let value_env =
     dict.insert(
       c.value_env,
-      QName(c.module.name, name),
-      ConstantGlobal(c.module.name, name, typ),
+      QualifiedName(c.module.name, name),
+      ModuleConstant(c.module.name, name, typ),
     )
   Context(..c, value_env:)
 }
@@ -1107,7 +1112,7 @@ fn register_type(
   variants: List(Variant),
 ) -> Context {
   let type_env =
-    dict.insert(c.type_env, QName(c.module.name, name), #(typ, variants))
+    dict.insert(c.type_env, QualifiedName(c.module.name, name), #(typ, variants))
   Context(..c, type_env:)
 }
 
@@ -1460,7 +1465,7 @@ fn do_infer_annotation(
       let params = list.reverse(params)
 
       // instantiate the polymorphic type with the parameter types
-      use #(_, poly, _variants) <- result.try(resolve_type_name(c, module, name))
+      use #(poly, _variants) <- result.try(resolve_type_name(c, module, name))
       let param_types = list.map(params, fn(param) { param.typ })
       use mapping <- result.map(
         list.strict_zip(poly.vars, param_types)
@@ -1523,16 +1528,16 @@ fn add_module_interface(c: Context, m: ModuleInterface) -> Context {
     list.fold(m.constants, c.value_env, fn(value_env, constant) {
       dict.insert(
         value_env,
-        QName(m.name, constant.name),
-        ConstantGlobal(m.name, constant.name, constant.typ),
+        QualifiedName(m.name, constant.name),
+        ModuleConstant(m.name, constant.name, constant.typ),
       )
     })
   let value_env =
     list.fold(m.functions, value_env, fn(value_env, function) {
       dict.insert(
         value_env,
-        QName(m.name, function.name),
-        FunctionGlobal(
+        QualifiedName(m.name, function.name),
+        ModuleFunction(
           m.name,
           function.name,
           function.typ,
@@ -1545,8 +1550,8 @@ fn add_module_interface(c: Context, m: ModuleInterface) -> Context {
     |> list.fold(value_env, fn(value_env, variant) {
       dict.insert(
         value_env,
-        QName(m.name, variant.name),
-        FunctionGlobal(
+        QualifiedName(m.name, variant.name),
+        ModuleFunction(
           m.name,
           variant.name,
           variant.typ,
@@ -1557,40 +1562,20 @@ fn add_module_interface(c: Context, m: ModuleInterface) -> Context {
 
   let type_env =
     list.fold(m.custom_types, c.type_env, fn(type_env, custom_type) {
-      dict.insert(type_env, QName(m.name, custom_type.name), #(
-        custom_type.typ,
-        custom_type.variants,
-      ))
+      let name = QualifiedName(m.name, custom_type.name)
+      dict.insert(type_env, name, #(custom_type.typ, custom_type.variants))
     })
 
   let type_env =
     list.fold(m.type_aliases, type_env, fn(type_env, type_alias) {
-      dict.insert(
-        type_env,
-        QName(m.name, type_alias.name),
-        #(type_alias.typ, []),
-      )
+      let name = QualifiedName(m.name, type_alias.name)
+      dict.insert(type_env, name, #(type_alias.typ, []))
     })
 
   Context(..c, value_env:, type_env:)
 }
 
-pub type ResolvedGlobal {
-  FunctionGlobal(
-    module: String,
-    name: String,
-    typ: Poly,
-    labels: List(Option(String)),
-  )
-  ConstantGlobal(module: String, name: String, typ: Poly)
-}
-
-type ResolvedVariable {
-  ResolvedLocal(name: String, typ: Type)
-  ResolvedGlobal(global: ResolvedGlobal)
-}
-
-/// Resolve an unqualified name against the local and then global environment.
+/// Resolve an unqualified name against the local scope, then module scope.
 fn resolve_unqualified_name(
   c: Context,
   n: LocalEnv,
@@ -1599,53 +1584,53 @@ fn resolve_unqualified_name(
   dict.get(n, name)
   |> result.map(ResolvedLocal(name, _))
   |> result.try_recover(fn(_) {
-    resolve_unqualified_global(c, name) |> result.map(ResolvedGlobal)
+    resolve_unqualified_module_value(c, name) |> result.map(ResolvedModuleValue)
   })
 }
 
-/// Resolve an unqualified name against the global environment.
-fn resolve_unqualified_global(
+/// Resolve an unqualified name against the module scope.
+fn resolve_unqualified_module_value(
   c: Context,
   name: String,
-) -> Result(ResolvedGlobal, Error) {
-  // try global env
-  resolve_global_name(c, c.module.name, name)
+) -> Result(ModuleValue, Error) {
+  // try the current module
+  lookup_module_value(c, c.module.name, name)
   |> result.try_recover(fn(_) {
     // try prelude
-    resolve_global_name(c, prelude, name)
+    lookup_module_value(c, prelude, name)
   })
 }
 
-/// Resolve a global from a possibly aliased module
-fn resolve_aliased_global(
+/// Resolve a module value from a possibly aliased module
+fn resolve_aliased_module_value(
   c: Context,
-  name: QName,
-) -> Result(ResolvedGlobal, Error) {
-  resolve_module(c, name.module)
-  |> result.try(resolve_global_name(c, _, name.name))
+  name: QualifiedName,
+) -> Result(ModuleValue, Error) {
+  lookup_module_alias(c, name.module)
+  |> result.try(lookup_module_value(c, _, name.name))
 }
 
-/// Resolve a name from the global environment
-fn resolve_global_name(
+/// Look up a value by its non-aliased module name
+fn lookup_module_value(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(ResolvedGlobal, Error) {
-  dict.get(c.value_env, QName(module_name, name))
-  |> result.replace_error(UnresolvedGlobal(context_location(c), name))
+) -> Result(ModuleValue, Error) {
+  dict.get(c.value_env, QualifiedName(module_name, name))
+  |> result.replace_error(UnresolvedModuleValue(context_location(c), name))
 }
 
-/// Resolve a type name from the global environment
+/// Resolve a type name in the module scope.
 fn resolve_type_name(
   c: Context,
   mod: Option(String),
   name: String,
-) -> Result(#(QName, Poly, List(Variant)), Error) {
+) -> Result(#(Poly, List(Variant)), Error) {
   case mod {
     Some(mod) -> resolve_aliased_type_name(c, mod, name)
     None ->
-      resolve_global_type_name(c, c.module.name, name)
-      |> result.try_recover(fn(_) { resolve_global_type_name(c, prelude, name) })
+      lookup_module_type(c, c.module.name, name)
+      |> result.try_recover(fn(_) { lookup_module_type(c, prelude, name) })
   }
 }
 
@@ -1654,35 +1639,37 @@ fn resolve_aliased_type_name(
   c: Context,
   module: String,
   name: String,
-) -> Result(#(QName, Poly, List(Variant)), Error) {
-  resolve_module(c, module)
-  |> result.try(resolve_global_type_name(c, _, name))
+) -> Result(#(Poly, List(Variant)), Error) {
+  lookup_module_alias(c, module)
+  |> result.try(lookup_module_type(c, _, name))
 }
 
-// Resolve a type name from a fully qualified module name
-fn resolve_global_type_name(
+/// Look up a type by its non-aliased module name
+fn lookup_module_type(
   c: Context,
   module_name: String,
   name: String,
-) -> Result(#(QName, Poly, List(Variant)), Error) {
-  dict.get(c.type_env, QName(module_name, name))
+) -> Result(#(Poly, List(Variant)), Error) {
+  dict.get(c.type_env, QualifiedName(module_name, name))
   |> result.replace_error(UnresolvedType(
     context_location(c),
     module_name <> "." <> name,
   ))
-  |> result.map(fn(t) { #(QName(module_name, name), t.0, t.1) })
 }
 
 /// Resolve a qualified or unqualified contructor name
 fn resolve_constructor_name(c: Context, mod: Option(String), name: String) {
   case mod {
-    Some(mod) -> resolve_aliased_global(c, QName(mod, name))
-    None -> resolve_unqualified_global(c, name)
+    Some(mod) -> resolve_aliased_module_value(c, QualifiedName(mod, name))
+    None -> resolve_unqualified_module_value(c, name)
   }
 }
 
-/// Resolve a module alias to its fully qualified name
-fn resolve_module(c: Context, module_name: String) -> Result(String, Error) {
+/// Look up a module alias, returning its fully qualified name
+fn lookup_module_alias(
+  c: Context,
+  module_name: String,
+) -> Result(String, Error) {
   dict.get(c.module_aliases, module_name)
   |> result.replace_error(UnresolvedModule(context_location(c), module_name))
 }
@@ -1971,9 +1958,9 @@ fn resolve_constructor(
 ) {
   use constructor <- result.try(resolve_constructor_name(c, module, constructor))
   case constructor {
-    FunctionGlobal(module:, name:, typ:, labels:) ->
+    ModuleFunction(module:, name:, typ:, labels:) ->
       Ok(#(module, name, typ, labels))
-    ConstantGlobal(..) ->
+    ModuleConstant(..) ->
       Error(NotAFunction(
         context_location(c),
         constructor.module <> "." <> constructor.name,
@@ -2346,6 +2333,31 @@ fn match_pattern_args(
   }
 }
 
+fn field_access_module_fallback(
+  c: Context,
+  container: g.Expression,
+  location: Span,
+  label: String,
+  original_error: Error,
+) -> Result(#(Context, Expression), Error) {
+  case container {
+    g.Variable(_, module) -> {
+      case resolve_aliased_module_value(c, QualifiedName(module, label)) {
+        Ok(ModuleFunction(module, name, poly, labels)) -> {
+          let #(c, typ) = instantiate(c, poly)
+          Ok(#(c, Function(typ, location, module, name, labels)))
+        }
+        Ok(ModuleConstant(module, name, poly)) -> {
+          let #(c, typ) = instantiate(c, poly)
+          Ok(#(c, Constant(typ, location, module, name)))
+        }
+        Error(e) -> Error(e)
+      }
+    }
+    _ -> Error(original_error)
+  }
+}
+
 fn infer_expression(
   c: Context,
   n: LocalEnv,
@@ -2360,13 +2372,13 @@ fn infer_expression(
     g.Variable(location:, name:) -> {
       let name = resolve_unqualified_name(c, n, name)
       case name {
-        Ok(ResolvedGlobal(global)) ->
-          case global {
-            FunctionGlobal(module, name, typ, labels) -> {
+        Ok(ResolvedModuleValue(module_value)) ->
+          case module_value {
+            ModuleFunction(module, name, typ, labels) -> {
               let #(c, typ) = instantiate(c, typ)
               Ok(#(c, Function(typ, location, module, name, labels)))
             }
-            ConstantGlobal(module, name, typ) -> {
+            ModuleConstant(module, name, typ) -> {
               let #(c, typ) = instantiate(c, typ)
               Ok(#(c, Constant(typ, location, module, name)))
             }
@@ -2595,74 +2607,63 @@ fn infer_expression(
       Ok(#(c, record_update))
     }
     g.FieldAccess(location:, container:, label:) -> {
-      let field_access = {
-        // try to infer the value, otherwise it might be a module access
-        use #(c, value) <- result.try(infer_expression(c, n, container))
-
-        // field access must be on a named type
-        let #(c, value_typ_resolved) = resolve_type(c, value.typ)
-        let value_typ = case value_typ_resolved {
-          NamedType(module, type_name, _) -> Ok(#(type_name, module))
-          _ -> Error(InvalidFieldAccess(context_location(c)))
-        }
-        use #(type_name, module) <- result.try(value_typ)
-
-        // find the custom type definition
-        use #(typ, variants) <- result.try(resolve_custom_type(
-          c,
-          module,
-          type_name,
-        ))
-
-        // access only works with one variant
-        let variant = case variants {
-          // TODO proper implementation checking all variants
-          [variant, ..] -> Ok(variant)
-          _ -> Error(InvalidFieldAccess(context_location(c)))
-        }
-        use variant <- result.try(variant)
-
-        // find the matching field and index
-        let field =
-          variant.fields
-          |> list.index_map(fn(x, i) { #(x, i) })
-          |> list.find(fn(x) { variant_field_label(x.0) == Some(label) })
-          |> result.replace_error(FieldNotFound(context_location(c), label))
-        use #(field, index) <- result.try(field)
-
-        // create a getter function type
-        let getter = FunctionType([typ.typ], field.item.typ)
-        let getter = Poly(typ.vars, getter)
-        let #(c, getter) = instantiate(c, getter)
-
-        // unify the getter as if we're calling it on the value
-        let #(c, typ) = new_type_var_ref(c)
-        use c <- result.map(unify(c, getter, FunctionType([value.typ], typ)))
-
-        #(
-          c,
-          FieldAccess(typ, location, value, label, module, variant.name, index),
-        )
-      }
-      case field_access {
-        Ok(access) -> Ok(access)
-        Error(e) -> {
-          // try a module access instead
-          case container {
-            g.Variable(_, module) -> {
-              case resolve_aliased_global(c, QName(module, label)) {
-                Ok(FunctionGlobal(module, name, poly, labels)) -> {
-                  let #(c, typ) = instantiate(c, poly)
-                  Ok(#(c, Function(typ, location, module, name, labels)))
-                }
-                Ok(ConstantGlobal(module, name, poly)) -> {
-                  let #(c, typ) = instantiate(c, poly)
-                  Ok(#(c, Constant(typ, location, module, name)))
-                }
-                Error(e) -> Error(e)
-              }
+      // try to infer the value, otherwise it might be a module access
+      case infer_expression(c, n, container) {
+        Error(e) ->
+          field_access_module_fallback(c, container, location, label, e)
+        Ok(#(c, value)) -> {
+          let field_access = {
+            // field access must be on a named type
+            let #(c, value_typ_resolved) = resolve_type(c, value.typ)
+            let value_typ = case value_typ_resolved {
+              NamedType(module, type_name, _) -> Ok(#(type_name, module))
+              _ -> Error(InvalidFieldAccess(context_location(c)))
             }
-            _ -> Error(e)
+            use #(type_name, module) <- result.try(value_typ)
+
+            // find the custom type definition
+            use #(typ, variants) <- result.try(lookup_module_type(
+              c,
+              module,
+              type_name,
+            ))
+
+            // access only works with one variant
+            let variant = case variants {
+              // TODO proper implementation checking all variants
+              [variant, ..] -> Ok(variant)
+              _ -> Error(InvalidFieldAccess(context_location(c)))
+            }
+            use variant <- result.try(variant)
+
+            // find the matching field and index
+            let field =
+              variant.fields
+              |> list.index_map(fn(x, i) { #(x, i) })
+              |> list.find(fn(x) { variant_field_label(x.0) == Some(label) })
+              |> result.replace_error(FieldNotFound(context_location(c), label))
+            use #(field, index) <- result.try(field)
+
+            // create a getter function type
+            let getter = FunctionType([typ.typ], field.item.typ)
+            let getter = Poly(typ.vars, getter)
+            let #(c, getter) = instantiate(c, getter)
+
+            // unify the getter as if we're calling it on the value
+            let #(c, typ) = new_type_var_ref(c)
+            use c <- result.map(unify(c, getter, FunctionType([value.typ], typ)))
+            let name = variant.name
+            #(c, FieldAccess(typ, location, value, label, module, name, index))
+          }
+          case field_access {
+            Ok(access) -> Ok(access)
+            Error(e) ->
+              case
+                field_access_module_fallback(c, container, location, label, e)
+              {
+                Ok(access) -> Ok(access)
+                Error(_) -> Error(e)
+              }
           }
         }
       }
@@ -3080,11 +3081,6 @@ fn map_binop(name: g.BinaryOperator) -> BinaryOperator {
     g.RemainderInt -> RemainderInt
     g.Concatenate -> Concatenate
   }
-}
-
-fn resolve_custom_type(c: Context, module: String, type_name: String) {
-  dict.get(c.type_env, QName(module, type_name))
-  |> result.replace_error(UnresolvedType(context_location(c), type_name))
 }
 
 fn tuple_index_type(

@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: field not found when module also lacks value test
+file: ./test/glance_typed_test.gleam
+test_name: field_not_found_when_module_also_lacks_value_test
+---
+This record does not have a field named 'q'

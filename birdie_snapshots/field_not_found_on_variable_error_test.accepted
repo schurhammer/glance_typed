@@ -1,0 +1,7 @@
+---
+version: 1.5.4
+title: field not found on variable error test
+file: ./test/glance_typed_test.gleam
+test_name: field_not_found_on_variable_error_test
+---
+This record does not have a field named 'y'

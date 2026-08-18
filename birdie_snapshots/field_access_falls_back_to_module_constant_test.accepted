@@ -1,0 +1,52 @@
+---
+version: 1.5.4
+title: field access falls back to module constant test
+file: ./test/glance_typed_test.gleam
+test_name: field_access_falls_back_to_module_constant_test
+---
+---
+name: test
+imports:
+- module: record
+types:
+- name: Rec
+  type: "() test.Rec"
+  publicity: private
+  opaque: false
+  variants:
+  - name: Rec
+    type: "() fn(gleam.Int) -> test.Rec"
+    fields:
+    - label: z
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: assignment
+    type: "test.Rec"
+    assignment_kind: let
+    pattern:
+      kind: variable_pattern
+      type: "test.Rec"
+      name: record
+    value:
+      kind: call
+      type: "test.Rec"
+      function:
+        kind: function
+        type: "fn(gleam.Int) -> test.Rec"
+        module: test
+        name: Rec
+      positional_arguments:
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+  - kind: constant
+    type: "gleam.Int"
+    module: record
+    name: y
+

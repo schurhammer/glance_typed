@@ -1313,6 +1313,17 @@ pub fn field_not_found_error_test() {
   |> birdie.snap(title: "field not found error test")
 }
 
+pub fn field_not_found_on_variable_error_test() {
+  infer_error_with_prelude(
+    "
+    type A { A(x: Int) }
+    pub fn f() { let a = A(1)  a.y }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "field not found on variable error test")
+}
+
 pub fn unresolved_module_error_test() {
   infer_error(
     "
@@ -1321,6 +1332,84 @@ pub fn unresolved_module_error_test() {
   )
   |> typed.inspect_error
   |> birdie.snap(title: "unresolved module error test")
+}
+
+fn record_module_dependencies() -> dict.Dict(String, typed.ModuleInterface) {
+  let prelude = typed.interface(typed.prelude_module())
+  let record_interface =
+    infer_interface(
+      prelude_deps(),
+      "
+      pub const y = 1
+      pub fn z2() { 2 }
+      ",
+      "record",
+    )
+  dict.from_list([#("gleam", prelude), #("record", record_interface)])
+}
+
+fn infer_error_with(
+  dependencies: dict.Dict(String, typed.ModuleInterface),
+  source: String,
+) -> typed.Error {
+  let assert Ok(parsed) = glance.module(source)
+  let assert Error(err) = typed.infer_module(dependencies, parsed, "test")
+  err
+}
+
+pub fn field_access_falls_back_to_module_constant_test() {
+  infer_with(
+    record_module_dependencies(),
+    "
+    import record
+    type Rec { Rec(z: Int) }
+    pub fn f() { let record = Rec(1)  record.y }
+    ",
+    "test",
+  )
+  |> glance_typed_yaml.module_to_string
+  |> birdie.snap(title: "field access falls back to module constant test")
+}
+
+pub fn field_access_falls_back_to_module_function_test() {
+  infer_with(
+    record_module_dependencies(),
+    "
+    import record
+    type Rec { Rec(z: Int) }
+    pub fn f() { let record = Rec(1)  record.z2 }
+    ",
+    "test",
+  )
+  |> glance_typed_yaml.module_to_string
+  |> birdie.snap(title: "field access falls back to module function test")
+}
+
+pub fn field_not_found_when_module_also_lacks_value_test() {
+  infer_error_with(
+    record_module_dependencies(),
+    "
+    import record
+    type Rec { Rec(z: Int) }
+    pub fn f() { let record = Rec(1)  record.q }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "field not found when module also lacks value test")
+}
+
+pub fn invalid_field_access_preserved_when_module_lacks_value_test() {
+  infer_error_with(
+    record_module_dependencies(),
+    "
+    import record
+    pub fn f() { let record = 1  record.q }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(
+    title: "invalid field access preserved when module lacks value test",
+  )
 }
 
 pub fn case_alternative_patterns_test() {
