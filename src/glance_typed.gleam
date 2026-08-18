@@ -3299,15 +3299,13 @@ fn unify_arguments(
 
 fn occurs(c: Context, id: TypeVarId, in: Type) -> #(Context, Bool) {
   case in {
-    VariableType(ref) ->
-      case get_type_var(c, ref) {
-        Bound(t) -> occurs(c, id, t)
-        Unbound -> {
-          // TODO not sure if this "set" is needed
-          let c = set_type_var(c, ref, Unbound)
-          #(c, id == ref)
-        }
+    VariableType(_) -> {
+      let #(c, resolved) = resolve_type(c, in)
+      case resolved {
+        VariableType(ref) -> #(c, id == ref)
+        _ -> occurs(c, id, resolved)
       }
+    }
     NamedType(_, _, args) ->
       list.fold(args, #(c, False), fn(acc, arg) {
         let #(c, b) = acc
