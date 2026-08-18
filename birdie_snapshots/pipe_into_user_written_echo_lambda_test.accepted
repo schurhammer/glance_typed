@@ -1,0 +1,35 @@
+---
+version: 1.5.4
+title: pipe into user written echo lambda test
+file: ./test/glance_typed_test.gleam
+test_name: pipe_into_user_written_echo_lambda_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: pipe
+    type: "gleam.Int"
+    left:
+      kind: int_literal
+      type: "gleam.Int"
+      value: "5"
+    right:
+      kind: fn_capture
+      function:
+        kind: fn
+        type: "fn(gleam.Int) -> gleam.Int"
+        parameters:
+        - type: "gleam.Int"
+          name: v
+        body:
+        - kind: echo
+          type: "gleam.Int"
+          expression:
+            kind: local_variable
+            type: "gleam.Int"
+            name: v
+

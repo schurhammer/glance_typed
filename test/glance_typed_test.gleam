@@ -792,6 +792,17 @@ pub fn pipe_with_args_test() {
   |> birdie.snap(title: "pipe with args test")
 }
 
+pub fn pipe_into_user_written_echo_lambda_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f() {
+      5 |> fn(v) { echo v }
+    }
+    ",
+  )
+  |> birdie.snap(title: "pipe into user written echo lambda test")
+}
+
 pub fn use_statement_test() {
   infer_yaml_with_prelude(
     "

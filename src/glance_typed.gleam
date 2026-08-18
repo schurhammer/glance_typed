@@ -2853,18 +2853,18 @@ fn infer_expression(
     }
     g.BinaryOperator(span, g.Pipe, left, right) -> {
       // first desugar the pipe
-      let #(idx, label, span, fun, args) = case right {
-        g.Call(span, fun, args) -> #(0, None, span, fun, [
-          g.UnlabelledField(left),
-          ..args
-        ])
+      let #(idx, label, span, fun, args, is_echo) = case right {
+        g.Call(span, fun, args) -> {
+          let args = [g.UnlabelledField(left), ..args]
+          #(0, None, span, fun, args, False)
+        }
         g.FnCapture(span, label, fun, before, after) -> {
           let arg = case label {
             Some(label) -> g.LabelledField(label, span, left)
             None -> g.UnlabelledField(left)
           }
           let args = list.flatten([before, [arg], after])
-          #(list.length(before), label, span, fun, args)
+          #(list.length(before), label, span, fun, args, False)
         }
         g.Echo(location: span, expression: None, message:) -> {
           let echo_ =
@@ -2875,9 +2875,9 @@ fn infer_expression(
                 message,
               )),
             ])
-          #(0, None, span, echo_, [g.UnlabelledField(left)])
+          #(0, None, span, echo_, [g.UnlabelledField(left)], True)
         }
-        _ -> #(0, None, span, right, [g.UnlabelledField(left)])
+        _ -> #(0, None, span, right, [g.UnlabelledField(left)], False)
       }
       // then infer and re-sugar the result
       use #(c, desugared) <- result.map(infer_call(c, n, span, fun, args, None))
@@ -2892,10 +2892,10 @@ fn infer_expression(
       // assert: the left-hand side of the pipe always exists
       let assert #([left], after) = list.split(after, 1)
       let left = left.item
-      let right = case function {
-        Fn(_, _, [_], _, [Expression(expression: Echo(message:, ..), ..)]) ->
-          PipeIntoEcho(message)
-        _ -> PipeIntoFnCapture(label, function, before, after)
+      let right = case is_echo, function {
+        True, Fn(_, _, [_], _, [Expression(expression: Echo(message:, ..), ..)])
+        -> PipeIntoEcho(message)
+        _, _ -> PipeIntoFnCapture(label, function, before, after)
       }
       #(c, Pipe(typ:, location:, left:, right:))
     }
