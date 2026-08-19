@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: fn arg field access test
 file: ./test/glance_typed_test.gleam
 test_name: fn_arg_field_access_test
@@ -57,8 +57,6 @@ functions:
           kind: local_variable
           type: "test.Foo(gleam.Int)"
           name: foo
-        module: test
-        variant: Foo
         label: value
         index: 0
 - name: apply

@@ -1,0 +1,62 @@
+---
+version: 2.0.2
+title: field access on all variants with consistent field test
+file: ./test/glance_typed_test.gleam
+test_name: field_access_on_all_variants_with_consistent_field_test
+---
+---
+name: test
+types:
+- name: Thing
+  type: "(0) test.Thing(0)"
+  publicity: public
+  opaque: false
+  parameters:
+  - a
+  variants:
+  - name: Wibble
+    type: "(0) fn(0, 0, 0) -> test.Thing(0)"
+    fields:
+    - label: foo
+      annotation:
+        annotation: a
+        type: "0"
+    - label: x
+      annotation:
+        annotation: a
+        type: "0"
+    - label: y
+      annotation:
+        annotation: a
+        type: "0"
+  - name: Wobble
+    type: "(0) fn(0, 0) -> test.Thing(0)"
+    fields:
+    - label: foo
+      annotation:
+        annotation: a
+        type: "0"
+    - label: z
+      annotation:
+        annotation: a
+        type: "0"
+functions:
+- name: foo
+  type: "(0) fn(test.Thing(0)) -> 0"
+  publicity: public
+  parameters:
+  - type: "test.Thing(0)"
+    name: w
+    annotation:
+      annotation: "Thing(a)"
+      type: "test.Thing(0)"
+  body:
+  - kind: field_access
+    type: "0"
+    container:
+      kind: local_variable
+      type: "test.Thing(0)"
+      name: w
+    label: foo
+    index: 0
+

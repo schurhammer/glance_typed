@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: field access test
 file: ./test/glance_typed_test.gleam
 test_name: field_access_test
@@ -38,8 +38,6 @@ functions:
       kind: local_variable
       type: "test.Box(0)"
       name: b
-    module: test
-    variant: Box
     label: value
     index: 0
 

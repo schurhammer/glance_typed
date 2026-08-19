@@ -2067,3 +2067,57 @@ pub fn type_shadowing_an_import_is_a_warning_test() {
 
   let assert [typed.ShadowsImport(name: "Option", ..)] = m.warnings
 }
+
+pub fn field_access_requires_field_in_every_variant_test() {
+  let assert typed.InconsistentFieldAccess(name: "radius", ..) =
+    infer_error_with_prelude(
+      "
+      pub type Shape {
+        Circle(radius: Int)
+        Square(side: Int)
+      }
+      pub fn f(s: Shape) { s.radius }
+      ",
+    )
+}
+
+pub fn field_access_requires_consistent_index_across_variants_test() {
+  let assert typed.InconsistentFieldAccess(name: "value", ..) =
+    infer_error_with_prelude(
+      "
+      pub type Wrapper {
+        A(tag: Int, value: Int)
+        B(value: Int, tag: Int)
+      }
+      pub fn f(w: Wrapper) { w.value }
+      ",
+    )
+}
+
+pub fn field_access_requires_consistent_type_across_variants_test() {
+  let assert typed.InconsistentFieldAccess(name: "value", ..) =
+    infer_error_with_prelude(
+      "
+      pub type Wrapper {
+        A(value: Int)
+        B(value: String)
+      }
+      pub fn f(w: Wrapper) { w.value }
+      ",
+    )
+}
+
+pub fn field_access_on_all_variants_with_consistent_field_test() {
+  infer_yaml(
+    "
+    pub type Thing(a) {
+      Wibble(foo: a, x: a, y: a)
+      Wobble(foo: a, z: a)
+    }
+    pub fn foo(w: Thing(a)) { w.foo }
+    ",
+  )
+  |> birdie.snap(
+    title: "field access on all variants with consistent field test",
+  )
+}

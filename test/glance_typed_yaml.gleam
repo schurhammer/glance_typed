@@ -387,19 +387,9 @@ fn expression_to_yaml(expression: typed.Expression) -> cymbal.Yaml {
           }),
         ),
       ])
-    typed.FieldAccess(
-      typ:,
-      container:,
-      module:,
-      constructor:,
-      label:,
-      index:,
-      ..,
-    ) ->
+    typed.FieldAccess(typ:, container:, label:, index:, ..) ->
       typed_node("field_access", typ, [
         #("container", expression_to_yaml(container)),
-        #("module", cymbal.string(module)),
-        #("variant", cymbal.string(constructor)),
         #("label", cymbal.string(label)),
         #("index", cymbal.int(index)),
       ])

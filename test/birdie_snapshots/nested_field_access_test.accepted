@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: nested field access test
 file: ./test/glance_typed_test.gleam
 test_name: nested_field_access_test
@@ -62,12 +62,8 @@ functions:
         kind: local_variable
         type: "test.Foo(test.Foo(gleam.Int))"
         name: a
-      module: test
-      variant: Foo
       label: value
       index: 0
-    module: test
-    variant: Foo
     label: value
     index: 0
 

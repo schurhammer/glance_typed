@@ -241,8 +241,6 @@ pub type Expression {
     location: Span,
     container: Expression,
     label: String,
-    module: String,
-    constructor: String,
     index: Int,
   )
   Call(
@@ -511,6 +509,7 @@ pub type Error {
   InvalidTupleAccess(location: Location)
   InvalidFieldAccess(location: Location)
   FieldNotFound(location: Location, name: String)
+  InconsistentFieldAccess(location: Location, name: String)
   UnresolvedTypeVariable(location: Location, name: String)
   NotAFunction(location: Location, name: String)
   WrongArity(location: Location, expected_arg_count: Int, actual_arg_count: Int)
@@ -1095,6 +1094,10 @@ pub fn inspect_error(error: Error) {
     InvalidFieldAccess(..) -> "Attempted field access on a non-record type"
     FieldNotFound(name:, ..) ->
       "This record does not have a field named '" <> name <> "'"
+    InconsistentFieldAccess(name:, ..) ->
+      "The field '"
+      <> name
+      <> "' is not at the same position with the same type in every variant"
     UnresolvedTypeVariable(name:, ..) ->
       "Type variable with name '" <> name <> "' not found"
     NotAFunction(name:, ..) -> "The variable '" <> name <> "' is not a function"
@@ -2769,21 +2772,36 @@ fn infer_expression(
               type_name,
             ))
 
-            // access only works with one variant
-            let variant = case variants {
-              // TODO proper implementation checking all variants
+            // find the matching field and index on the first variant
+            let first_variant = case variants {
               [variant, ..] -> Ok(variant)
-              _ -> Error(InvalidFieldAccess(context_location(c)))
+              [] -> Error(InvalidFieldAccess(context_location(c)))
             }
-            use variant <- result.try(variant)
+            use first_variant <- result.try(first_variant)
 
-            // find the matching field and index
             let field =
-              variant.fields
+              first_variant.fields
               |> list.index_map(fn(x, i) { #(x, i) })
               |> list.find(fn(x) { variant_field_label(x.0) == Some(label) })
               |> result.replace_error(FieldNotFound(context_location(c), label))
             use #(field, index) <- result.try(field)
+
+            // every other variant must have the same field at the same index
+            use _ <- result.try(
+              list.try_each(variants, fn(variant) {
+                let matches = case list.drop(variant.fields, index) {
+                  [other_field, ..] ->
+                    variant_field_label(other_field) == Some(label)
+                    && other_field.item.typ == field.item.typ
+                  [] -> False
+                }
+                case matches {
+                  True -> Ok(Nil)
+                  False ->
+                    Error(InconsistentFieldAccess(context_location(c), label))
+                }
+              }),
+            )
 
             // create a getter function type
             let getter = FunctionType([typ.typ], field.item.typ)
@@ -2793,8 +2811,7 @@ fn infer_expression(
             // unify the getter as if we're calling it on the value
             let #(c, typ) = new_type_var_ref(c)
             use c <- result.map(unify(c, getter, FunctionType([value.typ], typ)))
-            let name = variant.name
-            #(c, FieldAccess(typ, location, value, label, module, name, index))
+            #(c, FieldAccess(typ, location, value, label, index))
           }
           case field_access {
             Ok(access) -> Ok(access)
@@ -3740,21 +3757,11 @@ fn substitute_expression(
           }
         }),
       )
-    FieldAccess(
-      typ:,
-      location:,
-      container:,
-      module:,
-      constructor:,
-      label:,
-      index:,
-    ) ->
+    FieldAccess(typ:, location:, container:, label:, index:) ->
       FieldAccess(
         typ: substitute_type(c, rename, typ),
         location:,
         container: substitute_expression(c, rename, container),
-        module:,
-        constructor:,
         label:,
         index:,
       )
@@ -4138,8 +4145,8 @@ fn variant_field_label(field: VariantField(t)) -> Option(String) {
 
 fn field_label(field: Field(a)) -> Option(String) {
   case field {
-    LabelledField(..) -> Some(field.label)
-    ShorthandField(..) -> Some(field.label)
+    LabelledField(label:, ..) -> Some(label)
+    ShorthandField(label:, ..) -> Some(label)
     UnlabelledField(..) -> None
   }
 }
