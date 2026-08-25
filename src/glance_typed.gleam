@@ -949,16 +949,18 @@ pub fn interface(module: Module) -> ModuleInterface {
     imports: list.map(module.imports, fn(i) { i.definition.module }),
     custom_types: list.filter_map(module.custom_types, fn(t) {
       let custom_type = t.definition
+      let variants = list.map(custom_type.variants, public_variant)
       case custom_type.publicity {
         Private -> Error(Nil)
         Public if custom_type.opaque_ ->
           Ok(CustomType(..custom_type, variants: []))
-        Public -> Ok(custom_type)
+        Public -> Ok(CustomType(..custom_type, variants:))
       }
     }),
     type_aliases: list.filter_map(module.type_aliases, fn(t) {
       case t.definition.publicity {
-        Public -> Ok(t.definition)
+        Public ->
+          Ok(TypeAlias(..t.definition, typ: public_poly(t.definition.typ)))
         Private -> Error(Nil)
       }
     }),
@@ -967,7 +969,7 @@ pub fn interface(module: Module) -> ModuleInterface {
     })
       |> list.map(fn(c) {
         ConstantDeclaration(
-          typ: c.definition.typ,
+          typ: public_poly(c.definition.typ),
           name: c.definition.name,
           annotation: c.definition.annotation,
         )
@@ -977,13 +979,21 @@ pub fn interface(module: Module) -> ModuleInterface {
     })
       |> list.map(fn(f) {
         FunctionDeclaration(
-          typ: f.definition.typ,
+          typ: public_poly(f.definition.typ),
           name: f.definition.name,
           parameters: f.definition.parameters,
           return: f.definition.return,
         )
       }),
   )
+}
+
+fn public_poly(poly: Poly) -> Poly {
+  Poly(poly.vars, concrete_type(poly.typ))
+}
+
+fn public_variant(variant: Variant) -> Variant {
+  Variant(..variant, typ: public_poly(variant.typ))
 }
 
 pub fn known_variants(typ: Type) -> List(VariantRef) {

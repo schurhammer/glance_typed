@@ -3057,6 +3057,70 @@ pub fn accessors_on_unnarrowed_and_nested_types_test() {
   let assert typed.NamedType("test", "Pet", _) = ret
 }
 
+pub fn interface_strips_narrowings_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Pet {
+        Dog(name: String)
+        Cat
+      }
+
+      pub fn get_dog() {
+        Dog(\"Rex\")
+      }
+      ",
+    )
+  let assert [declaration] = typed.interface(module).functions
+  let assert typed.Poly(
+    vars: [],
+    typ: typed.FunctionType([], typed.NamedType("test", "Pet", [])),
+  ) = declaration.typ
+
+  let assert [definition] = module.functions
+  let assert typed.Poly(typ: typed.FunctionType(_, ret), ..) =
+    definition.definition.typ
+  let assert [typed.VariantRef("test", "Dog")] = typed.known_variants(ret)
+}
+
+pub fn imported_narrowing_is_stripped_test() {
+  let dependencies =
+    dict.from_list([
+      #("gleam", typed.interface(typed.prelude_module())),
+      #(
+        "pet",
+        infer_interface(
+          prelude_deps(),
+          "
+          pub type Pet {
+            Dog(name: String)
+            Cat
+          }
+
+          pub fn get_dog() {
+            Dog(\"Rex\")
+          }
+          ",
+          "pet",
+        ),
+      ),
+    ])
+  let assert Ok(parsed) =
+    glance.module(
+      "
+      import pet
+
+      pub fn describe() {
+        case pet.get_dog() {
+          pet.Dog(..) -> 1
+        }
+      }
+      ",
+    )
+  let assert Error(error) = typed.infer_module(dependencies, parsed, "example")
+  let assert typed.NonExhaustiveCase(_, ["pet.Cat"]) = error
+}
+
 pub fn constructor_return_variant_inference_test() {
   infer_yaml_with_prelude(
     "
