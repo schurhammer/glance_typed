@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: constructor call positional test
 file: ./test/glance_typed_test.gleam
 test_name: constructor_call_positional_test
@@ -29,14 +29,14 @@ types:
         type: "gleam.Int"
 functions:
 - name: main
-  type: "() fn() -> test.Point"
+  type: "() fn() -> test.Point{Point}"
   publicity: public
   body:
   - kind: call
-    type: "test.Point"
+    type: "test.Point{Point}"
     function:
       kind: function
-      type: "fn(gleam.Int, gleam.Int, gleam.Int) -> test.Point"
+      type: "fn(gleam.Int, gleam.Int, gleam.Int) -> test.Point{Point}"
       module: test
       name: Point
     positional_arguments:

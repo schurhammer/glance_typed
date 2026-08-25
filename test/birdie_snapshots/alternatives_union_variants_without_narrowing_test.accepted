@@ -1,0 +1,7 @@
+---
+version: 2.0.2
+title: alternatives union variants without narrowing test
+file: ./test/glance_typed_test.gleam
+test_name: alternatives_union_variants_without_narrowing_test
+---
+The field 'value' is not present at the same position with the same type in every variant of this custom type

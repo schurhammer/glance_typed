@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: custom type constructor test
 file: ./test/glance_typed_test.gleam
 test_name: custom_type_constructor_test
@@ -23,17 +23,17 @@ types:
         type: "0"
 functions:
 - name: box
-  type: "(0) fn(0) -> test.Box(0)"
+  type: "(0) fn(0) -> test.Box(0){Box}"
   publicity: public
   parameters:
   - type: "0"
     name: x
   body:
   - kind: call
-    type: "test.Box(0)"
+    type: "test.Box(0){Box}"
     function:
       kind: function
-      type: "fn(0) -> test.Box(0)"
+      type: "fn(0) -> test.Box(0){Box}"
       module: test
       name: Box
     positional_arguments:

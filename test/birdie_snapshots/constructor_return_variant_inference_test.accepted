@@ -1,0 +1,139 @@
+---
+version: 2.0.2
+title: constructor return variant inference test
+file: ./test/glance_typed_test.gleam
+test_name: constructor_return_variant_inference_test
+---
+---
+name: test
+types:
+- name: Pet
+  type: "() test.Pet"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Dog
+    type: "() fn(gleam.String, gleam.Int) -> test.Pet"
+    fields:
+    - label: name
+      annotation:
+        annotation: String
+        type: "gleam.String"
+    - label: cuteness
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+  - name: Turtle
+    type: "() fn(gleam.String, gleam.Int, gleam.Int) -> test.Pet"
+    fields:
+    - label: name
+      annotation:
+        annotation: String
+        type: "gleam.String"
+    - label: speed
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+    - label: times_renamed
+      annotation:
+        annotation: Int
+        type: "gleam.Int"
+functions:
+- name: inline_call
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: field_access
+    type: "gleam.Int"
+    container:
+      kind: call
+      type: "test.Pet{Dog}"
+      function:
+        kind: function
+        type: "fn(gleam.String, gleam.Int) -> test.Pet{Dog}"
+        module: test
+        name: Dog
+      positional_arguments:
+      - kind: string_literal
+        type: "gleam.String"
+        value: Xavier
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "10"
+    label: cuteness
+    index: 1
+- name: direct_binding
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: assignment
+    type: "test.Pet{Dog}"
+    assignment_kind: let
+    pattern:
+      kind: variable_pattern
+      type: "test.Pet"
+      name: dog
+    value:
+      kind: call
+      type: "test.Pet{Dog}"
+      function:
+        kind: function
+        type: "fn(gleam.String, gleam.Int) -> test.Pet{Dog}"
+        module: test
+        name: Dog
+      positional_arguments:
+      - kind: string_literal
+        type: "gleam.String"
+        value: Xavier
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "10"
+  - kind: field_access
+    type: "gleam.Int"
+    container:
+      kind: local_variable
+      type: "test.Pet{Dog}"
+      name: dog
+    label: cuteness
+    index: 1
+- name: your_dog_cuteness
+  type: "() fn() -> gleam.Int"
+  publicity: public
+  body:
+  - kind: assignment
+    type: "fn() -> test.Pet{Dog}"
+    assignment_kind: let
+    pattern:
+      kind: variable_pattern
+      type: "fn() -> test.Pet{Dog}"
+      name: your_dog
+    value:
+      kind: fn
+      type: "fn() -> test.Pet{Dog}"
+      body:
+      - kind: call
+        type: "test.Pet{Dog}"
+        function:
+          kind: function
+          type: "fn(gleam.String, gleam.Int) -> test.Pet{Dog}"
+          module: test
+          name: Dog
+        positional_arguments:
+        - kind: string_literal
+          type: "gleam.String"
+          value: Xavier
+        - kind: int_literal
+          type: "gleam.Int"
+          value: "10"
+  - kind: field_access
+    type: "gleam.Int"
+    container:
+      kind: call
+      type: "test.Pet{Dog}"
+      function:
+        kind: local_variable
+        type: "fn() -> test.Pet{Dog}"
+        name: your_dog
+    label: cuteness
+    index: 1
+

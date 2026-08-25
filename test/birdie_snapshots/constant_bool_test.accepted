@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: constant bool test
 file: ./test/glance_typed_test.gleam
 test_name: constant_bool_test
@@ -8,11 +8,11 @@ test_name: constant_bool_test
 name: test
 constants:
 - name: b
-  type: "() gleam.Bool"
+  type: "() gleam.Bool{True}"
   publicity: public
   value:
     kind: function
-    type: "gleam.Bool"
+    type: "gleam.Bool{True}"
     module: gleam
     name: True
 

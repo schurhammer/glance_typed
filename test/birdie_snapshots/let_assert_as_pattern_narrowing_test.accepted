@@ -1,0 +1,74 @@
+---
+version: 2.0.2
+title: let assert as pattern narrowing test
+file: ./test/glance_typed_test.gleam
+test_name: let_assert_as_pattern_narrowing_test
+---
+---
+name: test
+types:
+- name: Shape
+  type: "() test.Shape"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Circle
+    type: "() fn(gleam.Float) -> test.Shape"
+    fields:
+    - label: radius
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+  - name: Rect
+    type: "() fn(gleam.Float, gleam.Float) -> test.Shape"
+    fields:
+    - label: width
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+    - label: height
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+functions:
+- name: f
+  type: "() fn(test.Shape) -> gleam.Float"
+  publicity: public
+  parameters:
+  - type: "test.Shape"
+    name: shape
+    annotation:
+      annotation: Shape
+      type: "test.Shape"
+  return:
+    annotation: Float
+    type: "gleam.Float"
+  body:
+  - kind: assignment
+    type: "test.Shape"
+    assignment_kind: let_assert
+    pattern:
+      kind: assignment_pattern
+      type: "test.Shape"
+      name: c
+      pattern:
+        kind: constructor_pattern
+        type: "test.Shape"
+        constructor: Circle
+        with_spread: true
+        positional_arguments:
+        - unmatched: "gleam.Float"
+        resolved_module: test
+    value:
+      kind: local_variable
+      type: "test.Shape"
+      name: shape
+  - kind: field_access
+    type: "gleam.Float"
+    container:
+      kind: local_variable
+      type: "test.Shape{Circle}"
+      name: c
+    label: radius
+    index: 0
+

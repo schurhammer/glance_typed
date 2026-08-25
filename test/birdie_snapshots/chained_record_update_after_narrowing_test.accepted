@@ -1,0 +1,101 @@
+---
+version: 2.0.2
+title: chained record update after narrowing test
+file: ./test/glance_typed_test.gleam
+test_name: chained_record_update_after_narrowing_test
+---
+---
+name: test
+types:
+- name: Shape
+  type: "() test.Shape"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Circle
+    type: "() fn(gleam.Float) -> test.Shape"
+    fields:
+    - label: radius
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+  - name: Rect
+    type: "() fn(gleam.Float, gleam.Float) -> test.Shape"
+    fields:
+    - label: width
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+    - label: height
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+functions:
+- name: f
+  type: "() fn(test.Shape) -> test.Shape"
+  publicity: public
+  parameters:
+  - type: "test.Shape"
+    name: shape
+    annotation:
+      annotation: Shape
+      type: "test.Shape"
+  return:
+    annotation: Shape
+    type: "test.Shape"
+  body:
+  - kind: case
+    type: "test.Shape"
+    subjects:
+    - kind: local_variable
+      type: "test.Shape"
+      name: shape
+    clauses:
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "test.Shape"
+          constructor: Rect
+          with_spread: true
+          positional_arguments:
+          - unmatched: "gleam.Float"
+          - unmatched: "gleam.Float"
+          resolved_module: test
+      body:
+        kind: record_update
+        type: "test.Shape{Rect}"
+        module: test
+        constructor: Rect
+        record:
+          kind: record_update
+          type: "test.Shape{Rect}"
+          module: test
+          constructor: Rect
+          record:
+            kind: local_variable
+            type: "test.Shape{Rect}"
+            name: shape
+          positional_arguments:
+          - kind: float_literal
+            type: "gleam.Float"
+            value: "1.0"
+          - unchanged: "gleam.Float"
+        positional_arguments:
+        - unchanged: "gleam.Float"
+        - kind: float_literal
+          type: "gleam.Float"
+          value: "2.0"
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "test.Shape"
+          constructor: Circle
+          with_spread: true
+          positional_arguments:
+          - unmatched: "gleam.Float"
+          resolved_module: test
+      body:
+        kind: local_variable
+        type: "test.Shape{Circle}"
+        name: shape
+

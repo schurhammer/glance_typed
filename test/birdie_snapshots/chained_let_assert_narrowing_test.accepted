@@ -1,0 +1,87 @@
+---
+version: 2.0.2
+title: chained let assert narrowing test
+file: ./test/glance_typed_test.gleam
+test_name: chained_let_assert_narrowing_test
+---
+---
+name: test
+types:
+- name: Shape
+  type: "() test.Shape"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Circle
+    type: "() fn(gleam.Float) -> test.Shape"
+    fields:
+    - label: radius
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+  - name: Rect
+    type: "() fn(gleam.Float, gleam.Float) -> test.Shape"
+    fields:
+    - label: width
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+    - label: height
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+functions:
+- name: f
+  type: "() fn(gleam.Result(test.Shape, gleam.String)) -> gleam.Float"
+  publicity: public
+  parameters:
+  - type: "gleam.Result(test.Shape, gleam.String)"
+    name: r
+    annotation:
+      annotation: "Result(Shape, String)"
+      type: "gleam.Result(test.Shape, gleam.String)"
+  return:
+    annotation: Float
+    type: "gleam.Float"
+  body:
+  - kind: assignment
+    type: "gleam.Result(test.Shape, gleam.String)"
+    assignment_kind: let_assert
+    pattern:
+      kind: constructor_pattern
+      type: "gleam.Result(test.Shape, gleam.String)"
+      constructor: Ok
+      with_spread: false
+      positional_arguments:
+      - kind: variable_pattern
+        type: "test.Shape"
+        name: shape
+      resolved_module: gleam
+    value:
+      kind: local_variable
+      type: "gleam.Result(test.Shape, gleam.String)"
+      name: r
+  - kind: assignment
+    type: "test.Shape"
+    assignment_kind: let_assert
+    pattern:
+      kind: constructor_pattern
+      type: "test.Shape"
+      constructor: Circle
+      with_spread: true
+      positional_arguments:
+      - unmatched: "gleam.Float"
+      resolved_module: test
+    value:
+      kind: local_variable
+      type: "test.Shape"
+      name: shape
+  - kind: field_access
+    type: "gleam.Float"
+    container:
+      kind: local_variable
+      type: "test.Shape{Circle}"
+      name: shape
+    label: radius
+    index: 0
+

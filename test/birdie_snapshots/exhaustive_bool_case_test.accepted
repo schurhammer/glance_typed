@@ -1,0 +1,52 @@
+---
+version: 2.0.2
+title: exhaustive bool case test
+file: ./test/glance_typed_test.gleam
+test_name: exhaustive_bool_case_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn(gleam.Bool) -> gleam.Int"
+  publicity: public
+  parameters:
+  - type: "gleam.Bool"
+    name: b
+    annotation:
+      annotation: Bool
+      type: "gleam.Bool"
+  return:
+    annotation: Int
+    type: "gleam.Int"
+  body:
+  - kind: case
+    type: "gleam.Int"
+    subjects:
+    - kind: local_variable
+      type: "gleam.Bool"
+      name: b
+    clauses:
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "gleam.Bool"
+          constructor: True
+          with_spread: false
+          resolved_module: gleam
+      body:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+    - patterns:
+      -
+        - kind: constructor_pattern
+          type: "gleam.Bool"
+          constructor: False
+          with_spread: false
+          resolved_module: gleam
+      body:
+        kind: int_literal
+        type: "gleam.Int"
+        value: "0"
+

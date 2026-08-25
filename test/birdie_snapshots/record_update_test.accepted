@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: record update test
 file: ./test/glance_typed_test.gleam
 test_name: record_update_test
@@ -27,7 +27,7 @@ types:
         type: "0"
 functions:
 - name: reset_x
-  type: "(0) fn(test.Point(0), 0) -> test.Point(0)"
+  type: "(0) fn(test.Point(0), 0) -> test.Point(0){Point}"
   publicity: public
   parameters:
   - type: "test.Point(0)"
@@ -42,7 +42,7 @@ functions:
       type: "0"
   body:
   - kind: record_update
-    type: "test.Point(0)"
+    type: "test.Point(0){Point}"
     module: test
     constructor: Point
     record:

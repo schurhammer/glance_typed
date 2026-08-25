@@ -1,0 +1,7 @@
+---
+version: 2.0.2
+title: unsafe record update error test
+file: ./test/glance_typed_test.gleam
+test_name: unsafe_record_update_error_test
+---
+This value is not known to be a 'Rect', so it cannot be updated with the record update syntax

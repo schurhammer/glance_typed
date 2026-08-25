@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: record update fields out of order test
 file: ./test/glance_typed_test.gleam
 test_name: record_update_fields_out_of_order_test
@@ -29,7 +29,7 @@ types:
         type: "gleam.Int"
 functions:
 - name: reset
-  type: "() fn(test.Point, gleam.Int, gleam.Int, gleam.Int) -> test.Point"
+  type: "() fn(test.Point, gleam.Int, gleam.Int, gleam.Int) -> test.Point{Point}"
   publicity: public
   parameters:
   - type: "test.Point"
@@ -54,7 +54,7 @@ functions:
       type: "gleam.Int"
   body:
   - kind: record_update
-    type: "test.Point"
+    type: "test.Point{Point}"
     module: test
     constructor: Point
     record:

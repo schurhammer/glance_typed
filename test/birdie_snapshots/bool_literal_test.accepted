@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: bool literal test
 file: ./test/glance_typed_test.gleam
 test_name: bool_literal_test
@@ -8,11 +8,11 @@ test_name: bool_literal_test
 name: test
 functions:
 - name: f
-  type: "() fn() -> gleam.Bool"
+  type: "() fn() -> gleam.Bool{True}"
   publicity: public
   body:
   - kind: function
-    type: "gleam.Bool"
+    type: "gleam.Bool{True}"
     module: gleam
     name: True
 

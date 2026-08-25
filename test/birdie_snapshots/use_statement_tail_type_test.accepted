@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: use statement tail type test
 file: ./test/glance_typed_test.gleam
 test_name: use_statement_tail_type_test
@@ -56,10 +56,10 @@ functions:
         value: "0"
     body:
     - kind: call
-      type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+      type: "gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil){Ok}"
       function:
         kind: function
-        type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil)"
+        type: "fn(#(gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int), gleam.Nil){Ok}"
         module: gleam
         name: Ok
       positional_arguments:
@@ -136,10 +136,10 @@ functions:
           resolved_module: gleam
       body:
         kind: call
-        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil){Ok}"
         function:
           kind: function
-          type: "fn(#(gleam.Int, gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+          type: "fn(#(gleam.Int, gleam.Int, gleam.Int)) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil){Ok}"
           module: gleam
           name: Ok
         positional_arguments:
@@ -168,10 +168,10 @@ functions:
           resolved_module: gleam
       body:
         kind: call
-        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+        type: "gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil){Error}"
         function:
           kind: function
-          type: "fn(gleam.Nil) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil)"
+          type: "fn(gleam.Nil) -> gleam.Result(#(gleam.Int, gleam.Int, gleam.Int), gleam.Nil){Error}"
           module: gleam
           name: Error
         positional_arguments:

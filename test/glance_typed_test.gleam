@@ -636,6 +636,71 @@ pub fn imported_type_in_annotation_test() {
   |> birdie.snap(title: "imported type in annotation test")
 }
 
+pub fn constructor_alias_preserves_variant_test() {
+  let module =
+    infer_with(
+      option_dependencies(),
+      "
+      import gleam/option
+
+      fn x() {
+        let some = option.Some
+        let value = some(1)
+        case value {
+          option.Some(n) -> n + 1
+        }
+      }
+      ",
+      "example",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn compatible_function_parameter_is_not_narrowed_test() {
+  let assert typed.NonExhaustiveCase(_, ["Absent"]) =
+    infer_error_with_prelude(
+      "
+      pub type Maybe(a) {
+        Present(a)
+        Absent
+      }
+
+      fn apply(f: fn(Int) -> Maybe(Int)) -> Int {
+        let value = f(1)
+        case value {
+          Present(n) -> n
+        }
+      }
+      ",
+    )
+}
+
+pub fn constructor_variant_is_erased_by_annotated_function_test() {
+  let assert typed.NonExhaustiveCase(_, ["Absent"]) =
+    infer_error_with_prelude(
+      "
+      pub type Maybe(a) {
+        Present(a)
+        Absent
+      }
+
+      fn forget_constructor(
+        f: fn(Int) -> Maybe(Int),
+      ) -> fn(Int) -> Maybe(Int) {
+        f
+      }
+
+      fn x() {
+        let present = forget_constructor(Present)
+        let value = present(1)
+        case value {
+          Present(n) -> n
+        }
+      }
+      ",
+    )
+}
+
 pub fn call_non_function_test() {
   infer_error("pub fn f() { let x = 1  x(2) }")
   |> typed.inspect_error
@@ -1174,8 +1239,8 @@ pub fn pattern_spread_unnecessary_warning_test() {
     pub type Point { Point(x: Int, y: Int) }
 
     pub fn f(p: Point) {
-      let Point(x: 1, y: 2, ..) = p
-      1
+      let Point(x:, y:, ..) = p
+      x
     }
     ",
   )
@@ -1725,16 +1790,18 @@ pub fn let_assert_message_is_substituted_test() {
 }
 
 fn collect_type_variables(typ: typed.Type) -> List(typed.TypeVarId) {
-  case typ {
+  case typed.concrete_type(typ) {
     typed.VariableType(ref) -> [ref]
-    typed.NamedType(parameters: ps, ..) ->
-      list.flat_map(ps, collect_type_variables)
-    typed.TupleType(elements: es) -> list.flat_map(es, collect_type_variables)
-    typed.FunctionType(parameters: ps, return: r) ->
+    typed.NamedType(parameters:, ..) ->
+      list.flat_map(parameters, collect_type_variables)
+    typed.TupleType(elements:) ->
+      list.flat_map(elements, collect_type_variables)
+    typed.FunctionType(parameters:, return:) ->
       list.append(
-        list.flat_map(ps, collect_type_variables),
-        collect_type_variables(r),
+        list.flat_map(parameters, collect_type_variables),
+        collect_type_variables(return),
       )
+    typed.NarrowedType(..) -> []
   }
 }
 
@@ -2120,4 +2187,919 @@ pub fn field_access_on_all_variants_with_consistent_field_test() {
   |> birdie.snap(
     title: "field access on all variants with consistent field test",
   )
+}
+
+pub fn exhaustive_bool_case_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f(b: Bool) -> Int {
+      case b {
+        True -> 1
+        False -> 0
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "exhaustive bool case test")
+}
+
+pub fn inexhaustive_bool_case_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(b: Bool) -> Int {
+      case b {
+        True -> 1
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "inexhaustive bool case error test")
+}
+
+pub fn inexhaustive_result_case_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(r: Result(Int, String)) -> Int {
+      case r {
+        Ok(n) -> n
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "inexhaustive result case error test")
+}
+
+pub fn exhaustive_past_three_constructor_layers_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Pet {
+        Dog(name: String)
+        Cat
+      }
+
+      pub fn f(r: Result(Result(Result(Pet, String), String), String)) -> Int {
+        case r {
+          Ok(Ok(Ok(Dog(name: _)))) -> 1
+          Ok(Ok(Ok(Cat))) -> 6
+          Ok(Ok(Error(_))) -> 3
+          Ok(Error(_)) -> 4
+          Error(_) -> 5
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn exhaustive_bool_leaf_past_three_constructor_layers_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(r: Result(Result(Result(Bool, String), String), String)) -> Int {
+        case r {
+          Ok(Ok(Ok(True))) -> 1
+          Ok(Ok(Ok(False))) -> 2
+          Ok(Ok(Error(_))) -> 3
+          Ok(Error(_)) -> 4
+          Error(_) -> 5
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn alternatives_shared_name_conflicting_types_error_test() {
+  let assert typed.IncompatibleTypes(..) =
+    infer_error_with_prelude(
+      "
+      pub fn f(r: Result(Int, String)) -> String {
+        case r {
+          Ok(x) | Error(x) -> x <> \"!\"
+        }
+      }
+      ",
+    )
+}
+
+pub fn alternatives_compatible_shared_binding_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Nums {
+        One(n: Int)
+        Two(n: Int)
+      }
+
+      pub fn f(v: Nums) -> Int {
+        case v {
+          One(x) | Two(x) -> x + 1
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn alternatives_missing_name_in_second_alternative_test() {
+  let assert typed.InconsistentAlternativeBindings(_, "x") =
+    infer_error_with_prelude(
+      "
+      pub fn f(r: Result(Int, String)) -> Int {
+        case r {
+          Ok(x) | Error(_) -> x + 1
+        }
+      }
+      ",
+    )
+}
+
+pub fn alternatives_extra_name_in_second_alternative_test() {
+  let assert typed.InconsistentAlternativeBindings(_, "y") =
+    infer_error_with_prelude(
+      "
+      pub fn f(r: Result(Int, String)) -> String {
+        case r {
+          Ok(_) | Error(y) -> y <> \"!\"
+        }
+      }
+      ",
+    )
+}
+
+pub fn alternatives_bare_variable_must_match_alternatives_test() {
+  let assert typed.InconsistentAlternativeBindings(_, "x") =
+    infer_error_with_prelude(
+      "
+      pub fn f(r: Result(Int, String)) -> Int {
+        case r {
+          x | Ok(_) -> 1
+        }
+      }
+      ",
+    )
+}
+
+pub fn alternatives_multi_subject_shared_binding_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(b: Bool, n: Int) -> Int {
+        case b, n {
+          True, x | False, x -> x + 1
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn multi_element_list_enumerated_exhaustive_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(xs: List(Bool)) -> Int {
+        case xs {
+          [True, True] -> 1
+          [True, False] -> 2
+          [False, True] -> 3
+          [False, False] -> 4
+          [_] -> 5
+          [] -> 6
+          _ -> 7
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn multi_element_list_overlap_not_redundant_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(xs: List(Int)) -> Int {
+        case xs {
+          [1, _] -> 1
+          [_, 1] -> 2
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn multi_element_list_missing_witnesses_head_first_test() {
+  let assert typed.NonExhaustiveCase(_, witnesses) =
+    infer_error_with_prelude(
+      "
+      pub fn f(xs: List(Bool)) -> Int {
+        case xs {
+          [True, True, True] -> 1
+        }
+      }
+      ",
+    )
+  let assert [
+    "[]",
+    "[True, ..[]]",
+    "[True, True, ..[]]",
+    "[True, True, True, _, ..]",
+    "[True, True, False, ..]",
+    "[True, False, ..]",
+    "[False, ..]",
+  ] = witnesses
+}
+
+pub fn deep_nested_list_duplicate_clause_warning_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(xss: List(List(Bool))) -> Int {
+        case xss {
+          [[True], [False]] -> 1
+          [[True], [False]] -> 2
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn recursive_type_domain_terminates_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Chain {
+        Link(next: Chain)
+        End
+      }
+
+      pub fn f(chain: Chain) -> Int {
+        case chain {
+          Link(End) -> 0
+          Link(Link(_)) -> 1
+          End -> 2
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn missing_witness_precise_past_three_constructor_layers_test() {
+  let assert typed.NonExhaustiveCase(_, ["Ok(Ok(Ok(Cat)))"]) =
+    infer_error_with_prelude(
+      "
+      pub type Pet {
+        Dog(name: String)
+        Cat
+      }
+
+      pub fn f(r: Result(Result(Result(Pet, String), String), String)) -> Int {
+        case r {
+          Ok(Ok(Ok(Dog(name: _)))) -> 1
+          Ok(Ok(Error(_))) -> 3
+          Ok(Error(_)) -> 4
+          Error(_) -> 5
+        }
+      }
+      ",
+    )
+}
+
+pub fn inexhaustive_list_pattern_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(xs: List(Int)) -> Int {
+      case xs {
+        [x] -> x
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "inexhaustive list pattern error test")
+}
+
+pub fn inexhaustive_multi_subject_error_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(b: Bool, i: Int) -> Int {
+      case b, i {
+        False, 1 -> 1
+        True, 2 -> 2
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "inexhaustive multi subject error test")
+}
+
+pub fn inexhaustive_int_case_suggests_wildcard_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(n: Int) -> Int {
+      case n {
+        1 -> 10
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "inexhaustive int case suggests wildcard test")
+}
+
+pub fn guarded_clauses_do_not_cover_test() {
+  let assert typed.NonExhaustiveCase(_, ["True"]) =
+    infer_error_with_prelude(
+      "
+      pub fn f(value: Bool, condition: Bool) -> Int {
+        case value {
+          True if condition -> 1
+          False -> 0
+        }
+      }
+      ",
+    )
+}
+
+pub fn unreachable_duplicate_clause_warning_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn g(x: Bool) -> Int {
+        case x {
+          True -> 1
+          True -> 2
+          False -> 3
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn alternatives_make_later_clause_unreachable_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(x: Bool) -> Int {
+        case x {
+          True | False -> 1
+          True -> 2
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn unreachable_literal_clause_warning_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn h(x: Int) -> Int {
+        case x {
+          1 -> 10
+          2 -> 20
+          1 -> 30
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn equivalent_int_literals_are_redundant_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn h(x: Int) -> Int {
+        case x {
+          16 -> 1
+          0x10 -> 2
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn equivalent_float_literals_are_redundant_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn h(x: Float) -> Int {
+        case x {
+          1.50 -> 1
+          1.5 -> 2
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn guarded_clause_does_not_make_duplicate_clause_unreachable_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn g(x: Bool, b: Bool) -> Int {
+        case x {
+          True if b -> 1
+          True -> 2
+          False -> 3
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn duplicate_alternative_within_guarded_clause_warning_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn g(x: Bool, b: Bool) -> Int {
+        case x {
+          True | True if b -> 1
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [typed.UnreachablePattern(..)] = module.warnings
+}
+
+pub fn opaque_pattern_does_not_make_wildcard_unreachable_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(s: String) {
+        case s {
+          \"hello\" <> rest -> rest
+          _ -> s
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn refutable_plain_let_of_opaque_pattern_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(bits: BitArray) {
+      let <<a, b, _:bytes>> = bits
+      a + b
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "refutable plain let of opaque pattern test")
+}
+
+pub fn opaque_only_case_is_inexhaustive_test() {
+  infer_error_with_prelude(
+    "
+    pub fn f(s: String) -> Int {
+      case s {
+        \"a\" <> rest -> 1
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "opaque only case is inexhaustive test")
+}
+
+pub fn opaque_clauses_do_not_warn_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(s: String) -> Int {
+        case s {
+          \"a\" <> rest -> 1
+          \"b\" <> rest -> 2
+          _ -> 0
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn let_assert_string_prefix_ok_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f(s: String) -> String {
+      let assert \"a\" <> rest = s
+      rest
+    }
+    ",
+  )
+  |> birdie.snap(title: "let assert string prefix ok test")
+}
+
+pub fn nested_case_narrowed_exhaustive_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      case shape {
+        Circle(..) ->
+          case shape {
+            Circle(..) -> shape.radius
+          }
+        Rect(..) -> 2.0
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "nested case narrowed exhaustive test")
+}
+
+pub fn variant_narrowed_field_access_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn area(shape: Shape) -> Float {
+      case shape {
+        Circle(..) as c -> 3.14 *. c.radius *. c.radius
+        Rect(..) as r -> r.width *. r.height
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "variant narrowed field access test")
+}
+
+pub fn shadowed_nested_binder_is_untouched_by_narrowings_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Shape {
+        Circle(radius: Float)
+        Rect(width: Float, height: Float)
+      }
+
+      pub fn f(shape: Shape) -> Float {
+        case shape {
+          Circle(radius: shape) -> shape *. 2.0
+          Rect(..) -> 0.0
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn generic_tuple_plain_let_irrefutable_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn swap(pair: #(a, b)) -> #(b, a) {
+      let #(x, y) = pair
+      #(y, x)
+    }
+    ",
+  )
+  |> birdie.snap(title: "generic tuple plain let irrefutable test")
+}
+
+pub fn let_assert_variant_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      let assert Circle(..) = shape
+      shape.radius
+    }
+    ",
+  )
+  |> birdie.snap(title: "let assert variant narrowing test")
+}
+
+pub fn let_assert_as_pattern_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      let assert Circle(..) as c = shape
+      c.radius
+    }
+    ",
+  )
+  |> birdie.snap(title: "let assert as pattern narrowing test")
+}
+
+pub fn chained_let_assert_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(r: Result(Shape, String)) -> Float {
+      let assert Ok(shape) = r
+      let assert Circle(..) = shape
+      shape.radius
+    }
+    ",
+  )
+  |> birdie.snap(title: "chained let assert narrowing test")
+}
+
+pub fn list_spread_alias_inherits_narrowing_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub fn f(xs: List(Int)) {
+        let assert [_, ..] = xs
+        case xs {
+          [..rest] ->
+            case rest {
+              [_, ..] -> 1
+            }
+        }
+      }
+      ",
+    )
+  let assert [] = module.warnings
+}
+
+pub fn tuple_subject_variant_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      case #(shape, 1) {
+        #(Circle(..), _) -> shape.radius
+        #(Rect(..), _) -> 2.0
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "tuple subject variant narrowing test")
+}
+
+pub fn multi_subject_alternatives_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn g(a: Shape, b: Shape) -> Float {
+      case a, b {
+        Circle(..), Circle(..) | Circle(..), Rect(..) -> a.radius
+        Rect(..), _ -> a.width
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "multi subject alternatives narrowing test")
+}
+
+pub fn alternatives_union_variants_without_narrowing_test() {
+  infer_error_with_prelude(
+    "
+    pub type Maybe(a) {
+      Present(value: a)
+      Absent
+    }
+
+    pub fn f(maybe: Maybe(Int)) -> Int {
+      case maybe {
+        Present(..) | Absent -> maybe.value
+      }
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "alternatives union variants without narrowing test")
+}
+
+pub fn echo_subject_variant_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      case echo shape {
+        Circle(..) -> shape.radius
+        Rect(..) -> 2.0
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "echo subject variant narrowing test")
+}
+
+pub fn unsafe_record_update_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Shape {
+      Rect(..shape, width: 1.0)
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "unsafe record update error test")
+}
+
+pub fn record_update_after_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Shape {
+      case shape {
+        Rect(..) -> Rect(..shape, width: 99.0)
+        Circle(..) -> shape
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "record update after narrowing test")
+}
+
+pub fn chained_record_update_after_narrowing_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Shape {
+      case shape {
+        Rect(..) -> Rect(..Rect(..shape, width: 1.0), height: 2.0)
+        Circle(..) -> shape
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "chained record update after narrowing test")
+}
+
+pub fn refutable_let_pattern_error_test() {
+  infer_error_with_prelude(
+    "
+    pub type Shape {
+      Circle(radius: Float)
+      Rect(width: Float, height: Float)
+    }
+
+    pub fn f(shape: Shape) -> Float {
+      let Circle(..) = shape
+      1.0
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "refutable let pattern error test")
+}
+
+pub fn irrefutable_let_patterns_ok_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Point { Point(x: Int, y: Int) }
+
+    pub fn f(p: Point) -> Int {
+      let Point(x, y) = p
+      x + y
+    }
+    ",
+  )
+  |> birdie.snap(title: "irrefutable let patterns ok test")
+}
+
+pub fn known_variants_and_concrete_type_accessors_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Pet {
+        Dog(name: String)
+        Cat
+      }
+
+      pub fn main() {
+        Dog(\"Rex\")
+      }
+      ",
+    )
+  let assert Ok(main_def) =
+    list.find(module.functions, fn(d) { d.definition.name == "main" })
+  let assert typed.Poly(typ: typed.FunctionType(_, ret), ..) =
+    main_def.definition.typ
+  let assert [typed.VariantRef("test", "Dog")] = typed.known_variants(ret)
+  let assert typed.NamedType("test", "Pet", []) = typed.concrete_type(ret)
+}
+
+pub fn accessors_on_unnarrowed_and_nested_types_test() {
+  let pet = typed.NamedType("test", "Pet", [])
+  let dog = typed.VariantRef("test", "Dog")
+
+  let assert [] = typed.known_variants(pet)
+  let assert typed.NamedType("test", "Pet", _) = typed.concrete_type(pet)
+
+  let nested =
+    typed.FunctionType(
+      [typed.TupleType([pet, typed.NarrowedType(pet, [dog])])],
+      typed.NarrowedType(pet, [dog]),
+    )
+  let assert typed.FunctionType([typed.TupleType([_, inner])], ret) =
+    typed.concrete_type(nested)
+  let assert typed.NamedType("test", "Pet", _) = inner
+  let assert typed.NamedType("test", "Pet", _) = ret
+}
+
+pub fn constructor_return_variant_inference_test() {
+  infer_yaml_with_prelude(
+    "
+    pub type Pet {
+      Dog(name: String, cuteness: Int)
+      Turtle(name: String, speed: Int, times_renamed: Int)
+    }
+
+    pub fn your_dog_cuteness() {
+      let your_dog = fn() { Dog(\"Xavier\", 10) }
+      your_dog().cuteness
+    }
+
+    pub fn direct_binding() {
+      let dog = Dog(\"Xavier\", 10)
+      dog.cuteness
+    }
+
+    pub fn inline_call() {
+      Dog(\"Xavier\", 10).cuteness
+    }
+    ",
+  )
+  |> birdie.snap(title: "constructor return variant inference test")
+}
+
+pub fn annotated_return_erases_variant_test() {
+  infer_error_with_prelude(
+    "
+    pub type Pet {
+      Dog(name: String, cuteness: Int)
+      Turtle(name: String, speed: Int, times_renamed: Int)
+    }
+
+    pub fn mk_dog() -> Pet {
+      Dog(\"Xavier\", 10)
+    }
+
+    pub fn via_function() {
+      mk_dog().cuteness
+    }
+    ",
+  )
+  |> typed.inspect_error
+  |> birdie.snap(title: "annotated return erases variant test")
 }

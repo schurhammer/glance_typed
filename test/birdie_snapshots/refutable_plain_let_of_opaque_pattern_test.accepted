@@ -1,0 +1,9 @@
+---
+version: 2.0.2
+title: refutable plain let of opaque pattern test
+file: ./test/glance_typed_test.gleam
+test_name: refutable_plain_let_of_opaque_pattern_test
+---
+This assignment uses a pattern that does not match all possible values. The missing patterns are:
+
+    _

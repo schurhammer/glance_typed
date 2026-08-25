@@ -1,8 +1,8 @@
 ---
 version: 2.0.2
-title: pattern spread unnecessary warning test
+title: irrefutable let patterns ok test
 file: ./test/glance_typed_test.gleam
-test_name: pattern_spread_unnecessary_warning_test
+test_name: irrefutable_let_patterns_ok_test
 ---
 ---
 name: test
@@ -33,6 +33,9 @@ functions:
     annotation:
       annotation: Point
       type: "test.Point"
+  return:
+    annotation: Int
+    type: "gleam.Int"
   body:
   - kind: assignment
     type: "test.Point"
@@ -41,7 +44,7 @@ functions:
       kind: constructor_pattern
       type: "test.Point"
       constructor: Point
-      with_spread: true
+      with_spread: false
       positional_arguments:
       - kind: variable_pattern
         type: "gleam.Int"
@@ -54,14 +57,15 @@ functions:
       kind: local_variable
       type: "test.Point"
       name: p
-  - kind: local_variable
+  - kind: binary_operator
     type: "gleam.Int"
-    name: x
-warnings:
-- kind: unnecessary_spread
-  field_count: 2
-  location:
-    module: test
-    definition: f
-    span: "102-103"
+    name: "+"
+    left:
+      kind: local_variable
+      type: "gleam.Int"
+      name: x
+    right:
+      kind: local_variable
+      type: "gleam.Int"
+      name: y
 

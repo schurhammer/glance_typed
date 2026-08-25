@@ -1,0 +1,7 @@
+---
+version: 2.0.2
+title: annotated return erases variant test
+file: ./test/glance_typed_test.gleam
+test_name: annotated_return_erases_variant_test
+---
+The field 'cuteness' is not present at the same position with the same type in every variant of this custom type

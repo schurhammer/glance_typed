@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: record update all fields warning test
 file: ./test/glance_typed_test.gleam
 test_name: record_update_all_fields_warning_test
@@ -25,7 +25,7 @@ types:
         type: "gleam.Int"
 functions:
 - name: f
-  type: "() fn(test.Point) -> test.Point"
+  type: "() fn(test.Point) -> test.Point{Point}"
   publicity: public
   parameters:
   - type: "test.Point"
@@ -35,7 +35,7 @@ functions:
       type: "test.Point"
   body:
   - kind: record_update
-    type: "test.Point"
+    type: "test.Point{Point}"
     module: test
     constructor: Point
     record:

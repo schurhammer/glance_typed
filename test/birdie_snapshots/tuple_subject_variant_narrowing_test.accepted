@@ -1,0 +1,102 @@
+---
+version: 2.0.2
+title: tuple subject variant narrowing test
+file: ./test/glance_typed_test.gleam
+test_name: tuple_subject_variant_narrowing_test
+---
+---
+name: test
+types:
+- name: Shape
+  type: "() test.Shape"
+  publicity: public
+  opaque: false
+  variants:
+  - name: Circle
+    type: "() fn(gleam.Float) -> test.Shape"
+    fields:
+    - label: radius
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+  - name: Rect
+    type: "() fn(gleam.Float, gleam.Float) -> test.Shape"
+    fields:
+    - label: width
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+    - label: height
+      annotation:
+        annotation: Float
+        type: "gleam.Float"
+functions:
+- name: f
+  type: "() fn(test.Shape) -> gleam.Float"
+  publicity: public
+  parameters:
+  - type: "test.Shape"
+    name: shape
+    annotation:
+      annotation: Shape
+      type: "test.Shape"
+  return:
+    annotation: Float
+    type: "gleam.Float"
+  body:
+  - kind: case
+    type: "gleam.Float"
+    subjects:
+    - kind: tuple
+      type: "#(test.Shape, gleam.Int)"
+      elements:
+      - kind: local_variable
+        type: "test.Shape"
+        name: shape
+      - kind: int_literal
+        type: "gleam.Int"
+        value: "1"
+    clauses:
+    - patterns:
+      -
+        - kind: tuple_pattern
+          type: "#(test.Shape, gleam.Int)"
+          elements:
+          - kind: constructor_pattern
+            type: "test.Shape"
+            constructor: Circle
+            with_spread: true
+            positional_arguments:
+            - unmatched: "gleam.Float"
+            resolved_module: test
+          - kind: discard_pattern
+            type: "gleam.Int"
+      body:
+        kind: field_access
+        type: "gleam.Float"
+        container:
+          kind: local_variable
+          type: "test.Shape{Circle}"
+          name: shape
+        label: radius
+        index: 0
+    - patterns:
+      -
+        - kind: tuple_pattern
+          type: "#(test.Shape, gleam.Int)"
+          elements:
+          - kind: constructor_pattern
+            type: "test.Shape"
+            constructor: Rect
+            with_spread: true
+            positional_arguments:
+            - unmatched: "gleam.Float"
+            - unmatched: "gleam.Float"
+            resolved_module: test
+          - kind: discard_pattern
+            type: "gleam.Int"
+      body:
+        kind: float_literal
+        type: "gleam.Float"
+        value: "2.0"
+

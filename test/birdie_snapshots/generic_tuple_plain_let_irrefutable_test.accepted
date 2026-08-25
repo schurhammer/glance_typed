@@ -1,0 +1,49 @@
+---
+version: 2.0.2
+title: generic tuple plain let irrefutable test
+file: ./test/glance_typed_test.gleam
+test_name: generic_tuple_plain_let_irrefutable_test
+---
+---
+name: test
+functions:
+- name: swap
+  type: "(0, 1) fn(#(1, 0)) -> #(0, 1)"
+  publicity: public
+  parameters:
+  - type: "#(1, 0)"
+    name: pair
+    annotation:
+      annotation: "#(a, b)"
+      type: "#(1, 0)"
+  return:
+    annotation: "#(b, a)"
+    type: "#(0, 1)"
+  body:
+  - kind: assignment
+    type: "#(1, 0)"
+    assignment_kind: let
+    pattern:
+      kind: tuple_pattern
+      type: "#(1, 0)"
+      elements:
+      - kind: variable_pattern
+        type: "1"
+        name: x
+      - kind: variable_pattern
+        type: "0"
+        name: y
+    value:
+      kind: local_variable
+      type: "#(1, 0)"
+      name: pair
+  - kind: tuple
+    type: "#(0, 1)"
+    elements:
+    - kind: local_variable
+      type: "0"
+      name: y
+    - kind: local_variable
+      type: "1"
+      name: x
+

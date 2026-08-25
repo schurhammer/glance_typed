@@ -1,9 +1,11 @@
 import glance.{Span} as g
 import glance_typed/call_graph
 import glance_typed/graph
+import glance_typed/match
 import gleam/order
 
 import gleam/dict.{type Dict}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -474,6 +476,11 @@ pub type Type {
   TupleType(elements: List(Type))
   FunctionType(parameters: List(Type), return: Type)
   VariableType(ref: TypeVarId)
+  NarrowedType(typ: Type, variants: List(VariantRef))
+}
+
+pub type VariantRef {
+  VariantRef(module: String, name: String)
 }
 
 pub type Poly {
@@ -513,6 +520,7 @@ pub type Error {
   UnresolvedTypeVariable(location: Location, name: String)
   NotAFunction(location: Location, name: String)
   WrongArity(location: Location, expected_arg_count: Int, actual_arg_count: Int)
+  InconsistentAlternativeBindings(location: Location, name: String)
   LabelNotFound(location: Location, name: String)
   DuplicateLabel(location: Location, name: String)
   RecordUpdateOnUnlabelledConstructor(location: Location)
@@ -522,6 +530,9 @@ pub type Error {
   RecursiveTypeError(location: Location)
   BitPatternSegmentTypeOverSpecified(location: Location)
   InvalidAttributeArgument(location: Location)
+  NonExhaustiveCase(location: Location, missing: List(String))
+  LetPatternNotExhaustive(location: Location, missing: List(String))
+  UnsafeRecordUpdate(location: Location, constructor: String)
 }
 
 /// The reason an implicit `todo` expression was inserted.
@@ -541,6 +552,8 @@ pub type Warning {
   UnnecessaryRecordUpdate(location: Location, field_count: Int)
   /// A function or constant has the same name as an unqualified import.
   ShadowsImport(location: Location, name: String)
+  /// A pattern that can never match because of earlier patterns.
+  UnreachablePattern(location: Location)
 }
 
 type QualifiedName {
@@ -973,6 +986,26 @@ pub fn interface(module: Module) -> ModuleInterface {
   )
 }
 
+pub fn known_variants(typ: Type) -> List(VariantRef) {
+  case typ {
+    NarrowedType(_, variants) -> variants
+    _ -> []
+  }
+}
+
+/// Recursively removes NarrowedType, leaving just the plain type.
+pub fn concrete_type(typ: Type) -> Type {
+  case typ {
+    NarrowedType(typ, _) -> concrete_type(typ)
+    NamedType(module, name, parameters) ->
+      NamedType(module, name, list.map(parameters, concrete_type))
+    TupleType(elements) -> TupleType(list.map(elements, concrete_type))
+    FunctionType(parameters, return) ->
+      FunctionType(list.map(parameters, concrete_type), concrete_type(return))
+    VariableType(_) -> typ
+  }
+}
+
 /// Returns the Module for the Gleam prelude (the "gleam" module).
 /// This includes built-in types like Int, Float, String, Bool, Nil, List,
 /// Result, BitArray, and UtfCodepoint, along with their constructors.
@@ -1097,7 +1130,7 @@ pub fn inspect_error(error: Error) {
     InconsistentFieldAccess(name:, ..) ->
       "The field '"
       <> name
-      <> "' is not at the same position with the same type in every variant"
+      <> "' is not present at the same position with the same type in every variant of this custom type"
     UnresolvedTypeVariable(name:, ..) ->
       "Type variable with name '" <> name <> "' not found"
     NotAFunction(name:, ..) -> "The variable '" <> name <> "' is not a function"
@@ -1106,6 +1139,8 @@ pub fn inspect_error(error: Error) {
       <> int.to_string(expected_arg_count)
       <> " argument(s), got "
       <> int.to_string(actual_arg_count)
+    InconsistentAlternativeBindings(name:, ..) ->
+      "The patterns of this case clause do not all bind '" <> name <> "'"
     LabelNotFound(name:, ..) -> "'" <> name <> "' is not a valid label"
     DuplicateLabel(name:, ..) ->
       "The label '" <> name <> "' has already been given a value"
@@ -1130,6 +1165,20 @@ pub fn inspect_error(error: Error) {
       "Bit pattern segment type set multiple times"
     InvalidAttributeArgument(..) ->
       "Unexpected expression for attribute argument (only variable or string are allowed)"
+    NonExhaustiveCase(missing:, ..) ->
+      "This case expression does not have a pattern for all possible values. "
+      <> "The missing patterns are:\n\n"
+      <> list.map(missing, fn(pattern) { "    " <> pattern })
+      |> string.join("\n")
+    LetPatternNotExhaustive(missing:, ..) ->
+      "This assignment uses a pattern that does not match all possible values. "
+      <> "The missing patterns are:\n\n"
+      <> list.map(missing, fn(pattern) { "    " <> pattern })
+      |> string.join("\n")
+    UnsafeRecordUpdate(constructor:, ..) ->
+      "This value is not known to be a '"
+      <> constructor
+      <> "', so it cannot be updated with the record update syntax"
   }
 }
 
@@ -1159,6 +1208,8 @@ pub fn inspect_warning(warning: Warning) {
       <> " fields, so `..` has no effect"
     ShadowsImport(name:, ..) ->
       "This definition shadows the imported '" <> name <> "'"
+    UnreachablePattern(..) ->
+      "This pattern cannot be reached as a previous pattern matches the same values"
   }
 }
 
@@ -1308,6 +1359,11 @@ fn infer_function(
 
   // unify the return type with the last statement
   use c <- result.map(unify_body_return(c, return_type, body))
+
+  let typ = case fun.return, body_type(body) {
+    None, Some(tail) -> FunctionType(parameter_types, tail)
+    _, _ -> typ
+  }
 
   let name = fun.name
 
@@ -1787,7 +1843,7 @@ fn new_type_var_ref(c: Context) {
   let ref = TypeVarId(c.type_uid)
   let type_vars = dict.insert(c.type_vars, ref, Unbound)
   let typ = VariableType(ref)
-  #(Context(..c, type_vars: type_vars, type_uid: c.type_uid + 1), typ)
+  #(Context(..c, type_vars:, type_uid: c.type_uid + 1), typ)
 }
 
 fn annotation_type_or_new(c: Context, annotation: Option(Annotation)) {
@@ -2095,6 +2151,858 @@ fn infer_pattern(
   }
 }
 
+/// Narrow a type to the given variants, intersecting with any existing narrowing.
+fn narrow_type(typ: Type, variants: List(VariantRef)) -> Type {
+  case variants {
+    [] -> typ
+    _ ->
+      case typ {
+        NarrowedType(base, existing) ->
+          NarrowedType(base, list.filter(existing, list.contains(variants, _)))
+        _ -> NarrowedType(typ, list.unique(variants))
+      }
+  }
+}
+
+type SubjectPath {
+  SubjectVar(name: String)
+  SubjectTuple(elements: List(Result(SubjectPath, Nil)))
+}
+
+fn expression_path(expression: Expression) -> Result(SubjectPath, Nil) {
+  case expression {
+    LocalVariable(name:, ..) -> Ok(SubjectVar(name))
+    Tuple(elements:, ..) ->
+      case list.map(elements, expression_path) {
+        [] -> Error(Nil)
+        paths -> Ok(SubjectTuple(paths))
+      }
+    Echo(expression: Some(inner), ..) -> expression_path(inner)
+    _ -> Error(Nil)
+  }
+}
+
+/// Extract variant facts and name bindings from the pattern for a specific path.
+fn pattern_facts(
+  pattern: Pattern,
+  path: SubjectPath,
+) -> #(List(Fact), List(#(String, SubjectPath))) {
+  case pattern {
+    PatternTuple(elements:, ..) ->
+      case path {
+        SubjectTuple(element_paths) -> {
+          let pairs =
+            list.strict_zip(elements, element_paths) |> result.unwrap([])
+          list.fold(pairs, #([], []), fn(acc, pair) {
+            let #(element, element_path) = pair
+            let #(facts, aliases) = acc
+            case element_path {
+              Error(_) -> acc
+              Ok(element_path) -> {
+                let #(more_facts, more_aliases) =
+                  pattern_facts(element, element_path)
+                #(
+                  list.append(facts, more_facts),
+                  list.append(aliases, more_aliases),
+                )
+              }
+            }
+          })
+        }
+        _ -> #([], [])
+      }
+    PatternAssignment(pattern:, name:, ..) -> {
+      let #(facts, aliases) = pattern_facts(pattern, path)
+      let aliases = [#(name, path), ..aliases]
+      #(facts, aliases)
+    }
+    // A variable pattern at the root binds the value of the subject so it
+    // inherits its narrowing.
+    PatternVariable(name:, ..) -> #([], [#(name, path)])
+    PatternList(elements:, tail:, ..) ->
+      case elements, tail {
+        [], Some(tail) -> pattern_facts(tail, path)
+        [], None -> #([#(path, VariantRef(prelude, "Empty"))], [])
+        _, _ -> #([#(path, VariantRef(prelude, "NonEmpty"))], [])
+      }
+    PatternVariant(resolved_module:, constructor:, ..) -> #(
+      [#(path, VariantRef(resolved_module, constructor))],
+      [],
+    )
+    _ -> #([], [])
+  }
+}
+
+type Fact =
+  #(SubjectPath, VariantRef)
+
+type FactGroup =
+  #(SubjectPath, List(VariantRef))
+
+/// Copies each fact to aliases introduced by as-patterns.
+fn expand_alias_facts(
+  facts: List(Fact),
+  aliases: List(#(String, SubjectPath)),
+) -> List(Fact) {
+  list.append(
+    facts,
+    list.flat_map(aliases, fn(alias) {
+      let #(name, path) = alias
+      list.filter_map(facts, fn(entry) {
+        case entry.0 == path {
+          True -> Ok(#(SubjectVar(name), entry.1))
+          False -> Error(Nil)
+        }
+      })
+    }),
+  )
+}
+
+fn group_facts(facts: List(Fact)) -> List(FactGroup) {
+  list.fold(facts, [], fn(grouped: List(FactGroup), fact) {
+    let #(path, variant) = fact
+    let existing =
+      list.find(grouped, fn(entry: FactGroup) { entry.0 == path })
+      |> result.map(fn(entry) { entry.1 })
+      |> result.unwrap([])
+    let rest = list.filter(grouped, fn(entry: FactGroup) { entry.0 != path })
+    [#(path, [variant, ..existing]), ..rest]
+  })
+}
+
+/// Keep paths narrowed by every alternative, combining their possible variants.
+fn merge_alternative_facts(alternatives: List(List(Fact))) -> List(FactGroup) {
+  case alternatives {
+    [] -> []
+    [first, ..rest] ->
+      list.fold(rest, group_facts(first), fn(merged, facts) {
+        let grouped = group_facts(facts)
+        list.filter_map(merged, fn(entry) {
+          case list.find(grouped, fn(other) { other.0 == entry.0 }) {
+            Ok(#(_, variants)) ->
+              Ok(#(entry.0, list.unique(list.append(entry.1, variants))))
+            Error(_) -> Error(Nil)
+          }
+        })
+      })
+  }
+}
+
+/// Remove facts about subject variables whose names are rebound by the pattern.
+/// Those names refer to different values inside the clause.
+fn drop_rebound(
+  narrowings: List(FactGroup),
+  bound: List(String),
+) -> List(FactGroup) {
+  list.filter(narrowings, fn(entry: FactGroup) {
+    case entry.0 {
+      SubjectVar(name) -> !list.contains(bound, name)
+      SubjectTuple(..) -> True
+    }
+  })
+}
+
+fn apply_narrowings(
+  n: LocalEnv,
+  narrowings: List(#(SubjectPath, List(VariantRef))),
+) -> LocalEnv {
+  list.fold(narrowings, n, fn(n, narrowing) {
+    let #(path, variants) = narrowing
+    narrow_at_path(n, path, variants)
+  })
+}
+
+fn narrow_at_path(
+  n: LocalEnv,
+  path: SubjectPath,
+  variants: List(VariantRef),
+) -> LocalEnv {
+  case path {
+    SubjectVar(name) ->
+      case dict.get(n, name) {
+        Ok(typ) -> dict.insert(n, name, narrow_type(typ, variants))
+        Error(_) -> n
+      }
+    SubjectTuple(elements) ->
+      list.fold(elements, n, fn(n, element) {
+        case element {
+          Ok(element) -> narrow_at_path(n, element, variants)
+          Error(_) -> n
+        }
+      })
+  }
+}
+
+/// Alternatives sharing a body must bind exactly the same names.
+fn check_alternative_bindings(
+  c: Context,
+  alternatives: List(TypedAlternative),
+) -> Result(Context, Error) {
+  case alternatives {
+    [] | [_] -> Ok(c)
+    [first, ..rest] -> {
+      let bound = list.map(first.bindings, fn(binding) { binding.0 })
+      list.try_fold(rest, c, fn(c, alternative) {
+        let names = list.map(alternative.bindings, fn(binding) { binding.0 })
+        // Prefer reporting a name missing from the later alternative.
+        let witness =
+          result.or(
+            list.find(bound, fn(name) { !list.contains(names, name) }),
+            list.find(names, fn(name) { !list.contains(bound, name) }),
+          )
+        case witness {
+          Ok(name) ->
+            Error(InconsistentAlternativeBindings(context_location(c), name))
+          Error(_) -> Ok(c)
+        }
+      })
+    }
+  }
+}
+
+fn unify_alternative_binding_types(
+  c: Context,
+  alternatives: List(TypedAlternative),
+) -> Result(Context, Error) {
+  case alternatives {
+    [] -> Ok(c)
+    [first, ..rest] ->
+      list.try_fold(first.bindings, c, fn(c, binding) {
+        let #(name, typ) = binding
+        list.try_fold(rest, c, fn(c, alternative) {
+          case list.key_find(alternative.bindings, name) {
+            Ok(other) -> unify(c, typ, other)
+            Error(_) -> Ok(c)
+          }
+        })
+      })
+  }
+}
+
+/// Return names bound to parts of the matched value.
+/// Root variable and root as-pattern bindings are excluded.
+fn pattern_bound_names(pattern: Pattern) -> List(String) {
+  case pattern {
+    PatternVariable(..) -> []
+    PatternAssignment(pattern:, ..) -> pattern_bound_names(pattern)
+    _ ->
+      pattern_bindings(pattern)
+      |> list.map(fn(binding) { binding.0 })
+  }
+}
+
+fn pattern_bindings(pattern: Pattern) -> List(#(String, Type)) {
+  case pattern {
+    PatternVariable(name:, typ:, ..) -> [#(name, typ)]
+    PatternAssignment(pattern:, name:, typ:, ..) -> [
+      #(name, typ),
+      ..pattern_bindings(pattern)
+    ]
+    PatternTuple(elements:, ..) -> list.flat_map(elements, pattern_bindings)
+    PatternList(elements:, tail:, ..) -> {
+      let bound = list.flat_map(elements, pattern_bindings)
+      case tail {
+        Some(tail) -> list.append(bound, pattern_bindings(tail))
+        None -> bound
+      }
+    }
+    PatternConcatenate(prefix_name:, rest_name:, ..) -> {
+      let bound = case prefix_name {
+        Some(Named(name)) -> [#(name, string_type)]
+        _ -> []
+      }
+      case rest_name {
+        Named(name) -> [#(name, string_type), ..bound]
+        Discarded(_) -> bound
+      }
+    }
+    PatternBitString(segments:, ..) ->
+      list.flat_map(segments, fn(segment) { pattern_bindings(segment.0) })
+    PatternVariant(positional_arguments:, ..) ->
+      list.flat_map(positional_arguments, fn(argument) {
+        case argument {
+          MatchedArgument(pattern) -> pattern_bindings(pattern)
+          UnmatchedArgument(_) -> []
+        }
+      })
+    _ -> []
+  }
+}
+
+fn root_pattern_bindings(
+  pattern: Pattern,
+  subject_type: Type,
+) -> List(#(String, Type)) {
+  case pattern {
+    PatternVariable(name:, ..) -> [#(name, subject_type)]
+    PatternAssignment(pattern:, name:, ..) -> [
+      #(name, subject_type),
+      ..root_pattern_bindings(pattern, subject_type)
+    ]
+    PatternList(elements: [], tail: Some(tail), ..) ->
+      root_pattern_bindings(tail, subject_type)
+    _ -> pattern_bindings(pattern)
+  }
+}
+
+/// Restrict each subject domain to the variants already known to be possible.
+fn narrowed_domains(
+  n: LocalEnv,
+  paths: List(Result(SubjectPath, Nil)),
+  domains: List(match.Domain),
+) -> List(match.Domain) {
+  list.map2(paths, domains, fn(path, domain) {
+    let known = case path {
+      Ok(SubjectVar(name)) ->
+        dict.get(n, name)
+        |> result.map(known_variants)
+        |> result.unwrap([])
+      _ -> []
+    }
+    case known, domain {
+      [], _ -> domain
+      _, match.OpenDomain -> domain
+      _, match.ClosedDomain(ctors) ->
+        match.ClosedDomain(
+          list.filter(ctors, fn(constructor) {
+            list.contains(
+              known,
+              VariantRef(constructor.id.module, constructor.id.name),
+            )
+          }),
+        )
+    }
+  })
+}
+
+fn variant_of_constructor(
+  c: Context,
+  module: String,
+  name: String,
+  ret: Type,
+) -> Option(VariantRef) {
+  let #(_, ret) = resolve_type(c, ret)
+  case ret {
+    NamedType(type_module, type_name, _) ->
+      case lookup_module_type(c, type_module, type_name) {
+        Ok(#(_, variants)) ->
+          case list.find(variants, fn(v) { v.name == name }) {
+            Ok(_) -> Some(VariantRef(module, name))
+            Error(_) -> None
+          }
+        Error(_) -> None
+      }
+    _ -> None
+  }
+}
+
+fn narrow_constructor_result(
+  c: Context,
+  module: String,
+  name: String,
+  typ: Type,
+) -> Type {
+  let result = case typ {
+    FunctionType(_, return) -> return
+    _ -> typ
+  }
+  case variant_of_constructor(c, module, name, result) {
+    Some(variant) ->
+      case typ {
+        FunctionType(parameters, return) ->
+          FunctionType(parameters, narrow_type(return, [variant]))
+        _ -> narrow_type(typ, [variant])
+      }
+    None -> typ
+  }
+}
+
+fn check_record_update_safety(
+  c: Context,
+  base: Expression,
+  constructor_module: String,
+  constructor: String,
+  constructor_ret: Type,
+) -> Result(Context, Error) {
+  let #(_, ret) = resolve_type(c, constructor_ret)
+  case ret {
+    NamedType(module, name, _) ->
+      case lookup_module_type(c, module, name) {
+        Ok(#(_, [_])) -> Ok(c)
+        Ok(#(_, variants)) -> {
+          let known = expression_known_variants(base)
+          let this = VariantRef(constructor_module, constructor)
+          let declared =
+            list.contains(
+              list.map(variants, fn(v) { VariantRef(module, v.name) }),
+              this,
+            )
+          case list.contains(known, this) || !declared {
+            True -> Ok(c)
+            False -> Error(UnsafeRecordUpdate(context_location(c), constructor))
+          }
+        }
+        Error(_) -> Ok(c)
+      }
+    _ -> Ok(c)
+  }
+}
+
+fn expression_known_variants(expression: Expression) -> List(VariantRef) {
+  case expression {
+    Echo(expression: Some(inner), ..) -> expression_known_variants(inner)
+    _ -> known_variants(expression.typ)
+  }
+}
+
+fn check_let_irrefutable(
+  c: Context,
+  location: Span,
+  pattern: Pattern,
+) -> Result(Nil, Error) {
+  let domain = subject_domain(c, pattern.typ)
+  let missing =
+    match.witnesses([domain], [[coverage_pattern(pattern)]], [match.Wild], 1)
+  case missing {
+    [] -> Ok(Nil)
+    _ ->
+      Error(LetPatternNotExhaustive(
+        span_location(c, location),
+        render_missing(c, [domain], missing),
+      ))
+  }
+}
+
+fn narrow_after_pattern(n: LocalEnv, pattern: Pattern, value: Expression) {
+  case expression_path(value) {
+    Error(_) -> n
+    Ok(path) -> {
+      let #(facts, aliases) = pattern_facts(pattern, path)
+      // Never overwrite entries the pattern itself binds.
+      let bound = pattern_bound_names(pattern)
+      let narrowings =
+        group_facts(expand_alias_facts(facts, aliases))
+        |> drop_rebound(bound)
+      apply_narrowings(n, narrowings)
+    }
+  }
+}
+
+fn bind_pattern_variables(
+  n: LocalEnv,
+  pattern: Pattern,
+  typ: Type,
+) -> LocalEnv {
+  bind_names(n, root_pattern_bindings(pattern, typ))
+}
+
+fn bind_names(n: LocalEnv, bindings: List(#(String, Type))) -> LocalEnv {
+  list.fold(bindings, n, fn(n, binding) {
+    let #(name, binding_type) = binding
+    dict.insert(n, name, binding_type)
+  })
+}
+
+type TypedAlternative {
+  TypedAlternative(
+    patterns: List(Pattern),
+    facts: List(Fact),
+    bindings: List(#(String, Type)),
+  )
+}
+
+/// Exhaustiveness and redundancy checking for a whole case expression.
+/// Must run after every pattern has been inferred so the subjects' types
+/// are resolved and narrowed.
+fn check_case_coverage(
+  c: Context,
+  location: Span,
+  domains: List(match.Domain),
+  clauses: List(#(Option(g.Expression), List(TypedAlternative))),
+) -> Result(Context, Error) {
+  let #(c, _red_matrix, ex_matrix) =
+    list.fold(clauses, #(c, [], []), fn(acc, clause) {
+      let #(c, red_matrix, ex_matrix) = acc
+      let #(guard, alternatives) = clause
+
+      // Within one clause every alternative shares the guard, so an earlier
+      // alternative still makes a later overlapping one unreachable even
+      // when the clause is guarded.
+      let #(c, rows, _) =
+        list.fold(alternatives, #(c, [], red_matrix), fn(acc, alternative) {
+          let #(c, rows, red_matrix) = acc
+          let row = list.map(alternative.patterns, coverage_pattern)
+          let c = case match.witnesses(domains, red_matrix, row, 1) {
+            [] -> {
+              let assert [first_pattern, ..] = alternative.patterns
+              warn(
+                c,
+                UnreachablePattern(span_location(c, first_pattern.location)),
+              )
+            }
+            _ -> c
+          }
+          #(c, [row, ..rows], list.append(red_matrix, [row]))
+        })
+      let rows = list.reverse(rows)
+
+      // A guarded clause may still fail to match, so its rows go into
+      // neither matrix.
+      let #(red_matrix, ex_matrix) = case guard {
+        None -> #(list.append(red_matrix, rows), list.append(ex_matrix, rows))
+        Some(_) -> #(red_matrix, ex_matrix)
+      }
+      #(c, red_matrix, ex_matrix)
+    })
+
+  let query = list.repeat(match.Wild, list.length(domains))
+  case match.witnesses(domains, ex_matrix, query, missing_pattern_limit) {
+    [] -> Ok(c)
+    missing ->
+      Error(NonExhaustiveCase(
+        span_location(c, location),
+        render_missing(c, domains, missing),
+      ))
+  }
+}
+
+const missing_pattern_limit = 8
+
+fn subject_domains(
+  c: Context,
+  subjects: List(Expression),
+) -> List(match.Domain) {
+  list.map(subjects, fn(subject) { subject_domain(c, subject.typ) })
+}
+
+/// Build one level of the type's coverage domain.
+///
+/// Constructor arguments are expanded only when coverage checking needs them.
+/// This avoids eagerly unfolding recursive types and prevents exponential blowup.
+fn subject_domain(c: Context, typ: Type) -> match.Domain {
+  let #(_, typ) = resolve_type(c, typ)
+  case typ {
+    NamedType(module, "List", [element]) if module == prelude ->
+      match.ClosedDomain([
+        match.Constructor(match.ConstructorId(prelude, "Empty"), [], 0, fn() {
+          []
+        }),
+        match.Constructor(match.ConstructorId(prelude, "NonEmpty"), [], 2, fn() {
+          [subject_domain(c, element), subject_domain(c, typ)]
+        }),
+      ])
+    NamedType(module, name, parameters) ->
+      case lookup_module_type(c, module, name) {
+        Ok(#(_, [])) | Error(_) -> match.OpenDomain
+        Ok(#(poly, variants)) -> {
+          // Replace the declared type's own parameters with the concrete
+          // arguments used here so that nested domains are precise.
+          let mapping =
+            list.strict_zip(poly.vars, parameters)
+            |> result.unwrap([])
+            |> dict.from_list
+          match.ClosedDomain(
+            list.map(variants, fn(variant) {
+              let fields = variant.fields
+              match.Constructor(
+                match.ConstructorId(module, variant.name),
+                list.map(fields, variant_field_label),
+                list.length(fields),
+                fn() {
+                  list.map(fields, fn(field) {
+                    subject_domain(
+                      c,
+                      substitute_params(field.item.typ, mapping),
+                    )
+                  })
+                },
+              )
+            }),
+          )
+        }
+      }
+    TupleType(elements) ->
+      match.ClosedDomain([
+        match.Constructor(
+          match.ConstructorId("", "#"),
+          [],
+          list.length(elements),
+          fn() { list.map(elements, subject_domain(c, _)) },
+        ),
+      ])
+    _ -> match.OpenDomain
+  }
+}
+
+fn substitute_params(typ: Type, mapping: Dict(TypeVarId, Type)) -> Type {
+  case typ {
+    VariableType(ref) ->
+      case dict.get(mapping, ref) {
+        Ok(t) -> t
+        Error(_) -> typ
+      }
+    NamedType(module:, name:, parameters:) ->
+      NamedType(
+        module:,
+        name:,
+        parameters: list.map(parameters, substitute_params(_, mapping)),
+      )
+    FunctionType(parameters, return) ->
+      FunctionType(
+        list.map(parameters, substitute_params(_, mapping)),
+        substitute_params(return, mapping),
+      )
+    TupleType(elements) ->
+      TupleType(list.map(elements, substitute_params(_, mapping)))
+    NarrowedType(..) -> typ
+  }
+}
+
+fn canonical_int(value: String) -> String {
+  let value = string.replace(value, "_", "")
+  let #(negative, digits) = case value {
+    "-" <> rest -> #(True, rest)
+    _ -> #(False, value)
+  }
+  let #(digits, base) = case digits {
+    "0x" <> rest -> #(rest, 16)
+    "0o" <> rest -> #(rest, 8)
+    "0b" <> rest -> #(rest, 2)
+    _ -> #(digits, 10)
+  }
+  case int.base_parse(digits, base) {
+    Ok(parsed) ->
+      case negative {
+        True -> int.to_string(-parsed)
+        False -> int.to_string(parsed)
+      }
+    Error(_) -> value
+  }
+}
+
+fn canonical_float(value: String) -> String {
+  let value = string.replace(value, "_", "")
+  case float.parse(value) {
+    Ok(parsed) -> float.to_string(parsed)
+    Error(_) -> value
+  }
+}
+
+fn coverage_pattern(pattern: Pattern) -> match.Pattern {
+  case pattern {
+    PatternInt(value:, ..) -> match.IntPattern(canonical_int(value))
+    PatternFloat(value:, ..) -> match.FloatPattern(canonical_float(value))
+    PatternString(value:, ..) -> match.StringPattern(value)
+    PatternDiscard(..) | PatternVariable(..) -> match.Wild
+    // String prefix and bit array patterns are not analysed for now.
+    PatternConcatenate(..) | PatternBitString(..) -> match.OpaquePattern
+    PatternAssignment(pattern:, ..) -> coverage_pattern(pattern)
+    PatternTuple(elements:, ..) ->
+      match.ConstructorPattern(
+        match.ConstructorId("", "#"),
+        list.map(elements, coverage_pattern),
+      )
+    PatternList(elements:, tail:, ..) ->
+      case elements, tail {
+        [], None ->
+          match.ConstructorPattern(match.ConstructorId(prelude, "Empty"), [])
+        // the tail pattern matches the whole remaining list
+        [], Some(tail) -> coverage_pattern(tail)
+        _, _ -> {
+          let cons = match.ConstructorId(prelude, "NonEmpty")
+          let last = case tail {
+            Some(tail) -> coverage_pattern(tail)
+            None ->
+              match.ConstructorPattern(
+                match.ConstructorId(prelude, "Empty"),
+                [],
+              )
+          }
+          list.fold_right(elements, last, fn(rest, element) {
+            match.ConstructorPattern(cons, [coverage_pattern(element), rest])
+          })
+        }
+      }
+    PatternVariant(resolved_module:, constructor:, positional_arguments:, ..) ->
+      match.ConstructorPattern(
+        match.ConstructorId(resolved_module, constructor),
+        list.map(positional_arguments, fn(argument) {
+          case argument {
+            MatchedArgument(pattern) -> coverage_pattern(pattern)
+            UnmatchedArgument(_) -> match.Wild
+          }
+        }),
+      )
+  }
+}
+
+fn render_missing(
+  c: Context,
+  domains: List(match.Domain),
+  witnesses: List(List(match.Pattern)),
+) -> List(String) {
+  witnesses
+  |> list.map(fn(row) {
+    list.zip(row, pad_domains(domains, list.length(row)))
+    |> list.map(fn(column) { render_witness_value(c, Ok(column.1), column.0) })
+    |> string.join(", ")
+  })
+  |> list.unique
+}
+
+fn pad_domains(domains: List(match.Domain), length: Int) -> List(match.Domain) {
+  list.append(
+    domains,
+    list.repeat(match.OpenDomain, length - list.length(domains)),
+  )
+}
+
+fn render_witness_value(
+  c: Context,
+  domain: Result(match.Domain, Nil),
+  witness: match.Pattern,
+) -> String {
+  case witness {
+    match.Wild -> "_"
+    match.OpaquePattern -> "_"
+    match.IntPattern(value) -> value
+    match.FloatPattern(value) -> value
+    match.StringPattern(value) -> "\"" <> value <> "\""
+    match.ConstructorPattern(id, arguments) ->
+      render_witness_constructor(c, domain, id, arguments)
+  }
+}
+
+fn render_witness_constructor(
+  c: Context,
+  domain: Result(match.Domain, Nil),
+  id: match.ConstructorId,
+  arguments: List(match.Pattern),
+) -> String {
+  let constructor_info = case domain {
+    Ok(match.ClosedDomain(constructors)) ->
+      list.find(constructors, fn(candidate) { candidate.id == id })
+    _ -> Error(Nil)
+  }
+  let argument_domains = case constructor_info {
+    Ok(constructor) -> constructor.arguments()
+    Error(_) -> list.repeat(match.OpenDomain, list.length(arguments))
+  }
+  let no_labels = list.repeat(None, list.length(arguments))
+  case id.name {
+    "#" ->
+      string.concat([
+        "#(",
+        render_witness_arguments(c, arguments, argument_domains, no_labels),
+        ")",
+      ])
+    "Empty" if id.module == prelude -> "[]"
+    "NonEmpty" if id.module == prelude -> {
+      let #(element_domain, list_domain) = case argument_domains {
+        [element, list, ..] -> #(Ok(element), Ok(list))
+        _ -> #(Error(Nil), Error(Nil))
+      }
+      string.concat([
+        "[",
+        render_list_spine(c, element_domain, list_domain, arguments),
+        "]",
+      ])
+    }
+    _ -> {
+      let name = constructor_prefix(c, id) <> id.name
+      case arguments {
+        [] -> name
+        _ -> {
+          let labels = case constructor_info {
+            Ok(constructor) -> constructor.labels
+            Error(_) -> no_labels
+          }
+          string.concat([
+            name,
+            "(",
+            render_witness_arguments(c, arguments, argument_domains, labels),
+            ")",
+          ])
+        }
+      }
+    }
+  }
+}
+
+fn render_witness_arguments(
+  c: Context,
+  arguments: List(match.Pattern),
+  domains: List(match.Domain),
+  labels: List(Option(String)),
+) -> String {
+  list.map2(arguments, list.zip(domains, labels), fn(argument, metadata) {
+    let #(domain, label) = metadata
+    case label {
+      Some(label) ->
+        label
+        <> ":"
+        <> case argument {
+          match.Wild -> ""
+          _ -> " " <> render_witness_value(c, Ok(domain), argument)
+        }
+      None -> render_witness_value(c, Ok(domain), argument)
+    }
+  })
+  |> string.join(", ")
+}
+
+fn render_list_spine(
+  c: Context,
+  element_domain: Result(match.Domain, Nil),
+  list_domain: Result(match.Domain, Nil),
+  arguments: List(match.Pattern),
+) -> String {
+  case arguments {
+    [head, tail] -> {
+      let head_string = render_witness_value(c, element_domain, head)
+      case tail {
+        match.ConstructorPattern(id, inner_arguments)
+          if id == match.ConstructorId(prelude, "NonEmpty")
+        -> {
+          head_string
+          <> ", "
+          <> render_list_spine(c, element_domain, list_domain, inner_arguments)
+        }
+        match.Wild -> head_string <> ", .."
+        other ->
+          head_string <> ", .." <> render_witness_value(c, list_domain, other)
+      }
+    }
+    _ ->
+      string.join(
+        list.map(arguments, fn(argument) {
+          render_witness_value(c, element_domain, argument)
+        }),
+        ", ",
+      )
+  }
+}
+
+fn constructor_prefix(c: Context, id: match.ConstructorId) -> String {
+  let bare =
+    id.module == ""
+    || id.module == c.module.name
+    || id.module == prelude
+    || dict.get(c.value_origin, QualifiedName(c.module.name, id.name))
+    == Ok(Imported)
+  case bare {
+    True -> ""
+    False -> module_display_name(c, id.module) <> "."
+  }
+}
+
+fn module_display_name(c: Context, module: String) -> String {
+  case list.key_find(dict.to_list(c.module_aliases), module) {
+    Ok(alias) -> alias
+    Error(_) -> module
+  }
+}
+
 fn resolve_constructor(
   c: Context,
   module: Option(String),
@@ -2171,9 +3079,11 @@ fn infer_body(
           // and the assigned value
           use c <- result.try(unify(c, pattern.typ, value.typ))
 
-          // TODO check the right "kind" was used (needs exhaustive checking)
           use #(c, kind) <- result.try(case kind {
-            g.Let -> Ok(#(c, Let))
+            g.Let -> {
+              check_let_irrefutable(c, location, pattern)
+              |> result.map(fn(_) { #(c, Let) })
+            }
             g.LetAssert(None) -> Ok(#(c, LetAssert(None)))
             g.LetAssert(Some(message)) -> {
               use #(c, message) <- result.try(infer_expression(c, n, message))
@@ -2181,6 +3091,9 @@ fn infer_body(
               Ok(#(c, LetAssert(Some(message))))
             }
           })
+
+          let n = bind_pattern_variables(n, pattern, value.typ)
+          let n = narrow_after_pattern(n, pattern, value)
 
           let statement =
             Assignment(
@@ -2489,6 +3402,7 @@ fn field_access_module_fallback(
       case resolve_aliased_module_value(c, QualifiedName(module, label)) {
         Ok(ModuleFunction(module, name, poly, labels)) -> {
           let #(c, typ) = instantiate(c, poly)
+          let typ = narrow_constructor_result(c, module, name, typ)
           Ok(#(c, Function(typ, location, module, name, labels)))
         }
         Ok(ModuleConstant(module, name, poly)) -> {
@@ -2520,6 +3434,8 @@ fn infer_expression(
           case module_value {
             ModuleFunction(module, name, typ, labels) -> {
               let #(c, typ) = instantiate(c, typ)
+              // Record the exact variant produced by a constructor.
+              let typ = narrow_constructor_result(c, module, name, typ)
               Ok(#(c, Function(typ, location, module, name, labels)))
             }
             ModuleConstant(module, name, typ) -> {
@@ -2660,6 +3576,15 @@ fn infer_expression(
       // Unify the base expression type with the constructor type
       use c <- result.try(unify(c, base_expr.typ, constructor_ret))
 
+      // Updating a record is only safe when it cannot be some other variant
+      use c <- result.try(check_record_update_safety(
+        c,
+        base_expr,
+        res_module,
+        constructor,
+        constructor_ret,
+      ))
+
       // Infer types for all updated fields
       use #(c, updated_fields) <- result.try(
         list.try_fold(fields, #(c, []), fn(acc, field) {
@@ -2732,8 +3657,8 @@ fn infer_expression(
           }
         })
 
-      // The result type is the same as the constructor type
-      let typ = constructor_ret
+      let #(_, base) = resolve_type(c, constructor_ret)
+      let typ = NarrowedType(base, [VariantRef(res_module, constructor)])
 
       // Create the RecordUpdate expression
       let record_update =
@@ -2766,11 +3691,20 @@ fn infer_expression(
             use #(type_name, module) <- result.try(value_typ)
 
             // find the custom type definition
-            use #(typ, variants) <- result.try(lookup_module_type(
+            use #(typ, all_variants) <- result.try(lookup_module_type(
               c,
               module,
               type_name,
             ))
+
+            let narrowed = known_variants(value.typ)
+            let variants = case narrowed {
+              [] -> all_variants
+              refs ->
+                list.filter(all_variants, fn(variant) {
+                  list.contains(refs, VariantRef(module, variant.name))
+                })
+            }
 
             // find the matching field and index on the first variant
             let first_variant = case variants {
@@ -2938,54 +3872,94 @@ fn infer_expression(
         }),
       )
       let subjects = list.reverse(subjects)
+      let subject_paths = list.map(subjects, expression_path)
 
       // all of the branches should unify with the case type
       let #(c, typ) = new_type_var_ref(c)
 
-      use #(c, clauses) <- result.try(
-        list.try_fold(clauses, #(c, []), fn(acc, clause) {
-          let #(c, clauses) = acc
+      use #(c, alternatives, clauses) <- result.try(
+        list.try_fold(clauses, #(c, [], []), fn(acc, clause) {
+          let #(c, alternatives, clauses) = acc
 
           // patterns is a List(List(Pattern))
           // the inner list has a pattern to match each subject
           // the outer list has alternatives that have the same body
-          use #(c, n, patterns) <- result.try(
-            list.try_fold(clause.patterns, #(c, n, []), fn(acc, pat) {
-              let #(c, n, pats) = acc
+          // each alternative starts with the outer environment
+          use #(c, typed_alts) <- result.try(
+            list.try_fold(clause.patterns, #(c, []), fn(acc, pattern) {
+              let #(c, typed) = acc
 
               // each pattern has a corresponding subject
-              use sub_pats <- result.try(
-                list.strict_zip(subjects, pat)
+              use sub_patterns <- result.try(
+                list.strict_zip(subjects, pattern)
                 |> result.map_error(fn(_) {
                   WrongArity(
                     context_location(c),
                     list.length(subjects),
-                    list.length(pat),
+                    list.length(pattern),
                   )
                 }),
               )
-              use #(c, n, pat) <- result.map(
-                list.try_fold(sub_pats, #(c, n, []), fn(acc, sub_pat) {
-                  let #(c, n, pats) = acc
+
+              use #(c, _alternative_n, pairs) <- result.map(
+                list.try_fold(sub_patterns, #(c, n, []), fn(acc, sub_pat) {
+                  let #(c, n, pairs) = acc
                   let #(sub, pat) = sub_pat
                   use #(c, n, pat) <- result.try(infer_pattern(c, n, pat))
-                  // the pattern type should match the corresponding subject
+
                   use c <- result.map(unify(c, pat.typ, sub.typ))
-                  #(c, n, [pat, ..pats])
+
+                  let n = bind_pattern_variables(n, pat, sub.typ)
+                  #(c, n, [#(pat, sub.typ), ..pairs])
                 }),
               )
-              let pat = list.reverse(pat)
+              let pairs = list.reverse(pairs)
+              let patterns = list.map(pairs, fn(pair) { pair.0 })
 
-              // all alternatives must bind the same names
-              // TODO check the alternative patterns bind the same names
-              // how do we check this? do we need to unify (based on name)?
-              // maybe infer_pattern needs to return a list of bindings
-              // instead of a new env
+              // Collect what this alternative teaches about the subjects and aliases.
+              let facts =
+                list.strict_zip(patterns, subject_paths)
+                |> result.unwrap([])
+                |> list.flat_map(fn(column) {
+                  let #(typed_pattern, path) = column
+                  case path {
+                    Error(_) -> []
+                    Ok(path) -> {
+                      let #(facts, aliases) = pattern_facts(typed_pattern, path)
+                      expand_alias_facts(facts, aliases)
+                    }
+                  }
+                })
 
-              #(c, n, [pat, ..pats])
+              let bindings =
+                list.flat_map(pairs, fn(pair) {
+                  let #(pat, subject_type) = pair
+                  root_pattern_bindings(pat, subject_type)
+                })
+
+              #(c, [TypedAlternative(patterns:, facts:, bindings:), ..typed])
             }),
           )
-          let patterns = list.reverse(patterns)
+          let typed_alts = list.reverse(typed_alts)
+
+          use c <- result.try(check_alternative_bindings(c, typed_alts))
+
+          use c <- result.try(unify_alternative_binding_types(c, typed_alts))
+          let n =
+            bind_names(n, case typed_alts {
+              [first, ..] -> first.bindings
+              [] -> []
+            })
+
+          let narrowings =
+            merge_alternative_facts(list.map(typed_alts, fn(a) { a.facts }))
+          let rebound =
+            typed_alts
+            |> list.flat_map(fn(a) {
+              list.flat_map(a.patterns, pattern_bound_names)
+            })
+            |> list.unique
+          let n = apply_narrowings(n, drop_rebound(narrowings, rebound))
 
           // if the guard exists ensure it has a boolean result
           use #(c, guard) <- result.try(case clause.guard {
@@ -3002,12 +3976,25 @@ fn infer_expression(
           // the body should unify with the case type
           use c <- result.map(unify(c, typ, body.typ))
 
+          let patterns = list.map(typed_alts, fn(a) { a.patterns })
           let santa = Clause(patterns:, guard:, body:)
-          #(c, [santa, ..clauses])
+          let alternatives = [#(clause.guard, typed_alts), ..alternatives]
+          #(c, alternatives, [santa, ..clauses])
         }),
       )
+      let alternatives = list.reverse(alternatives)
       let clauses = list.reverse(clauses)
 
+      // coverage runs after every pattern has been inferred so the subject
+      // types are fully resolved
+      let domains =
+        narrowed_domains(n, subject_paths, subject_domains(c, subjects))
+      use c <- result.try(check_case_coverage(
+        c,
+        location,
+        domains,
+        alternatives,
+      ))
       Ok(#(c, Case(typ:, location:, subjects:, clauses:)))
     }
     g.BinaryOperator(span, g.Pipe, left, right) -> {
@@ -3207,9 +4194,17 @@ fn infer_call(
 
   let arg_types = list.map(positional_fields, fn(expr) { expr.typ })
 
+  let #(_, resolved_fun) = resolve_type(c, fun.typ)
+  let variant_refs = case resolved_fun {
+    FunctionType(_, ret) -> known_variants(ret)
+    _ -> []
+  }
+
   // unify the function type with the types of args
   let #(c, typ) = new_type_var_ref(c)
   use c <- result.map(unify(c, fun.typ, FunctionType(arg_types, typ)))
+  let #(c, typ) = resolve_type(c, typ)
+  let typ = narrow_type(typ, variant_refs)
   #(c, InferredCall(typ, span, fun, arguments, positional_fields))
 }
 
@@ -3302,6 +4297,12 @@ fn infer_fn(
   // unify the return type with the last statement
   use c <- result.map(unify_body_return(c, return_type, body))
 
+  let typ = case return_annotation, body_type(body) {
+    None, Some(tail) ->
+      FunctionType(list.map(parameters, fn(p) { p.typ }), tail)
+    _, _ -> typ
+  }
+
   let fun = Fn(typ:, location:, parameters:, return_annotation:, body:)
   #(c, fun)
 }
@@ -3375,6 +4376,7 @@ fn find_tvs(c: Context, t: Type) -> List(TypeVarId) {
     NamedType(_, _, args) -> list.flat_map(args, find_tvs(c, _))
     FunctionType(args, ret) -> list.flat_map([ret, ..args], find_tvs(c, _))
     TupleType(elements) -> list.flat_map(elements, find_tvs(c, _))
+    NarrowedType(typ, _) -> find_tvs(c, typ)
   }
 }
 
@@ -3402,6 +4404,8 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
       )
     TupleType(elements) ->
       TupleType(list.map(elements, do_instantiate(c, n, _)))
+    NarrowedType(typ, variants) ->
+      NarrowedType(do_instantiate(c, n, typ), variants)
   }
 }
 
@@ -3478,6 +4482,7 @@ fn occurs(c: Context, id: TypeVarId, in: Type) -> #(Context, Bool) {
         let #(c, b1) = occurs(c, id, arg)
         #(c, b || b1)
       })
+    NarrowedType(typ, _) -> occurs(c, id, typ)
   }
 }
 
@@ -3500,6 +4505,7 @@ fn resolve_type(c: Context, typ: Type) -> #(Context, Type) {
         Unbound -> #(c, typ)
       }
     }
+    NarrowedType(typ, _) -> resolve_type(c, typ)
     NamedType(..) -> #(c, typ)
     FunctionType(..) -> #(c, typ)
     TupleType(..) -> #(c, typ)
@@ -3995,6 +5001,8 @@ fn substitute_type(c: Context, rename: Dict(TypeVarId, TypeVarId), typ: Type) {
       let elements = list.map(elements, substitute_type(c, rename, _))
       TupleType(elements:)
     }
+    NarrowedType(typ, variants) ->
+      NarrowedType(substitute_type(c, rename, typ), variants)
     VariableType(ref) -> {
       case get_type_var(c, ref) {
         Bound(x) -> substitute_type(c, rename, x)

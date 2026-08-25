@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: field access falls back to module function test
 file: ./test/glance_typed_test.gleam
 test_name: field_access_falls_back_to_module_function_test
@@ -27,7 +27,7 @@ functions:
   publicity: public
   body:
   - kind: assignment
-    type: "test.Rec"
+    type: "test.Rec{Rec}"
     assignment_kind: let
     pattern:
       kind: variable_pattern
@@ -35,10 +35,10 @@ functions:
       name: record
     value:
       kind: call
-      type: "test.Rec"
+      type: "test.Rec{Rec}"
       function:
         kind: function
-        type: "fn(gleam.Int) -> test.Rec"
+        type: "fn(gleam.Int) -> test.Rec{Rec}"
         module: test
         name: Rec
       positional_arguments:

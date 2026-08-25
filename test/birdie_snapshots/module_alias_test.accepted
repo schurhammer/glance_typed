@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: module alias test
 file: ./test/glance_typed_test.gleam
 test_name: module_alias_test
@@ -11,7 +11,7 @@ imports:
   alias: opt
 functions:
 - name: wrap
-  type: "() fn(gleam.Int) -> gleam/option.Option(gleam.Int)"
+  type: "() fn(gleam.Int) -> gleam/option.Option(gleam.Int){Some}"
   publicity: public
   parameters:
   - type: "gleam.Int"
@@ -21,10 +21,10 @@ functions:
       type: "gleam.Int"
   body:
   - kind: call
-    type: "gleam/option.Option(gleam.Int)"
+    type: "gleam/option.Option(gleam.Int){Some}"
     function:
       kind: function
-      type: "fn(gleam.Int) -> gleam/option.Option(gleam.Int)"
+      type: "fn(gleam.Int) -> gleam/option.Option(gleam.Int){Some}"
       module: "gleam/option"
       name: Some
     positional_arguments:

@@ -27,7 +27,7 @@ functions:
   publicity: public
   body:
   - kind: assignment
-    type: "test.Foo(test.Foo(gleam.Int))"
+    type: "test.Foo(test.Foo(gleam.Int)){Foo}"
     assignment_kind: let
     pattern:
       kind: variable_pattern
@@ -35,18 +35,18 @@ functions:
       name: a
     value:
       kind: call
-      type: "test.Foo(test.Foo(gleam.Int))"
+      type: "test.Foo(test.Foo(gleam.Int)){Foo}"
       function:
         kind: function
-        type: "fn(test.Foo(gleam.Int)) -> test.Foo(test.Foo(gleam.Int))"
+        type: "fn(test.Foo(gleam.Int)) -> test.Foo(test.Foo(gleam.Int)){Foo}"
         module: test
         name: Foo
       positional_arguments:
       - kind: call
-        type: "test.Foo(gleam.Int)"
+        type: "test.Foo(gleam.Int){Foo}"
         function:
           kind: function
-          type: "fn(gleam.Int) -> test.Foo(gleam.Int)"
+          type: "fn(gleam.Int) -> test.Foo(gleam.Int){Foo}"
           module: test
           name: Foo
         positional_arguments:
@@ -60,7 +60,7 @@ functions:
       type: "test.Foo(gleam.Int)"
       container:
         kind: local_variable
-        type: "test.Foo(test.Foo(gleam.Int))"
+        type: "test.Foo(test.Foo(gleam.Int)){Foo}"
         name: a
       label: value
       index: 0

@@ -35,10 +35,10 @@ functions:
       name: apply
     positional_arguments:
     - kind: call
-      type: "test.Foo(gleam.Int)"
+      type: "test.Foo(gleam.Int){Foo}"
       function:
         kind: function
-        type: "fn(gleam.Int) -> test.Foo(gleam.Int)"
+        type: "fn(gleam.Int) -> test.Foo(gleam.Int){Foo}"
         module: test
         name: Foo
       positional_arguments:

@@ -1,0 +1,38 @@
+---
+version: 2.0.2
+title: let assert string prefix ok test
+file: ./test/glance_typed_test.gleam
+test_name: let_assert_string_prefix_ok_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn(gleam.String) -> gleam.String"
+  publicity: public
+  parameters:
+  - type: "gleam.String"
+    name: s
+    annotation:
+      annotation: String
+      type: "gleam.String"
+  return:
+    annotation: String
+    type: "gleam.String"
+  body:
+  - kind: assignment
+    type: "gleam.String"
+    assignment_kind: let_assert
+    pattern:
+      kind: concatenate_pattern
+      type: "gleam.String"
+      prefix: a
+      suffix_name: rest
+    value:
+      kind: local_variable
+      type: "gleam.String"
+      name: s
+  - kind: local_variable
+    type: "gleam.String"
+    name: rest
+

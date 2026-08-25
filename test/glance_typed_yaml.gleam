@@ -56,6 +56,11 @@ fn warning_to_yaml(warning: typed.Warning) -> cymbal.Yaml {
         #("name", cymbal.string(name)),
         #("location", location_to_yaml(location)),
       ])
+    typed.UnreachablePattern(location:) ->
+      yaml_block([
+        #("kind", cymbal.string("unreachable_pattern")),
+        #("location", location_to_yaml(location)),
+      ])
   }
 }
 
@@ -745,6 +750,11 @@ fn type_to_string(typ: typed.Type) -> String {
     typed.FunctionType(parameters:, return:) ->
       "fn(" <> of_list(parameters) <> ") -> " <> type_to_string(return)
     typed.VariableType(ref:) -> int.to_string(ref.id)
+    typed.NarrowedType(typ:, variants:) ->
+      type_to_string(typ)
+      <> "{"
+      <> string.join(list.map(variants, fn(v) { v.name }), ", ")
+      <> "}"
   }
 }
 

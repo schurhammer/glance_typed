@@ -1,0 +1,9 @@
+---
+version: 2.0.2
+title: opaque only case is inexhaustive test
+file: ./test/glance_typed_test.gleam
+test_name: opaque_only_case_is_inexhaustive_test
+---
+This case expression does not have a pattern for all possible values. The missing patterns are:
+
+    _

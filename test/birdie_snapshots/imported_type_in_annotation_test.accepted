@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: imported type in annotation test
 file: ./test/glance_typed_test.gleam
 test_name: imported_type_in_annotation_test
@@ -25,10 +25,10 @@ functions:
     type: "gleam/option.Option(gleam.Int)"
   body:
   - kind: call
-    type: "gleam/option.Option(gleam.Int)"
+    type: "gleam/option.Option(gleam.Int){Some}"
     function:
       kind: function
-      type: "fn(gleam.Int) -> gleam/option.Option(gleam.Int)"
+      type: "fn(gleam.Int) -> gleam/option.Option(gleam.Int){Some}"
       module: "gleam/option"
       name: Some
     positional_arguments:

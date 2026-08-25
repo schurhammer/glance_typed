@@ -1,0 +1,9 @@
+---
+version: 2.0.2
+title: inexhaustive result case error test
+file: ./test/glance_typed_test.gleam
+test_name: inexhaustive_result_case_error_test
+---
+This case expression does not have a pattern for all possible values. The missing patterns are:
+
+    Error(_)

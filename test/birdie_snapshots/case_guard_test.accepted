@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: case guard test
 file: ./test/glance_typed_test.gleam
 test_name: case_guard_test
@@ -43,7 +43,7 @@ functions:
           value: "0"
       body:
         kind: function
-        type: "gleam.Bool"
+        type: "gleam.Bool{True}"
         module: gleam
         name: True
     - patterns:
@@ -52,7 +52,7 @@ functions:
           type: "gleam.Int"
       body:
         kind: function
-        type: "gleam.Bool"
+        type: "gleam.Bool{False}"
         module: gleam
         name: False
 
