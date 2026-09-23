@@ -779,6 +779,63 @@ fn incompatible_types_at(source: String) -> String {
   slice_bytes(source, start, end - start)
 }
 
+fn error_message(source: String) -> String {
+  typed.inspect_error(infer_error_with_prelude(source))
+}
+
+pub fn incompatible_types_reports_whole_types_test() {
+  assert error_message("pub fn f(x: List(Int)) -> List(String) { x }")
+    == "Expected type List(String), found type List(Int)"
+}
+
+pub fn incompatible_types_names_annotation_variables_test() {
+  assert error_message("pub fn f(x: a) -> a { 1 }")
+    == "Expected type a, found type Int"
+}
+
+pub fn incompatible_types_names_other_variables_test() {
+  assert error_message("pub fn f(x: a) -> #(a, Int) { #(x, []) }")
+    == "Expected type #(a, Int), found type #(a, List(b))"
+}
+
+pub fn incompatible_types_names_variables_in_order_test() {
+  assert error_message("pub fn f() -> #(Int, Int) { #([], []) }")
+    == "Expected type #(Int, Int), found type #(List(a), List(b))"
+}
+
+pub fn incompatible_types_names_fn_parameters_first_test() {
+  assert error_message("pub fn f() -> Int { fn(x) { todo } }")
+    == "Expected type Int, found type fn(a) -> b"
+}
+
+pub fn incompatible_tuple_sizes_test() {
+  assert error_message("pub fn f() -> #(Int, Int) { #(1, 2, 3) }")
+    == "Expected type #(Int, Int), found type #(Int, Int, Int)"
+}
+
+pub fn incompatible_argument_test() {
+  assert error_message("pub fn g(x: Int) { x } pub fn f() { g(\"s\") }")
+    == "Expected type Int, found type String"
+}
+
+pub fn incompatible_let_pattern_test() {
+  assert error_message("pub fn f() { let assert [x] = \"a\"  x }")
+    == "Expected type String, found type List(a)"
+}
+
+pub fn call_fn_value_wrong_arity_test() {
+  assert error_message("pub fn f(g: fn(Int) -> Int) { g(1, 2) }")
+    == "Expected 1 argument(s), got 2"
+}
+
+pub fn incompatible_constructor_pattern_argument_test() {
+  let source =
+    "pub type Box { Box(Int) }
+    pub fn f(b: Box) { case b { Box(\"s\") -> 1  _ -> 2 } }"
+  assert error_message(source) == "Expected type Int, found type String"
+  assert incompatible_types_at(source) == "\"s\""
+}
+
 pub fn generic_annotation_cannot_specialise_test() {
   assert incompatible_types_at("pub fn f(x: a) -> a { 1 }") == "1"
 }
