@@ -2985,6 +2985,77 @@ pub fn chained_record_update_after_narrowing_test() {
   |> birdie.snap(title: "chained record update after narrowing test")
 }
 
+pub fn record_update_changes_type_parameter_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Box(a) { Box(tag: Int, value: a) }
+
+      pub fn map(box, f) { Box(..box, value: f(box.value)) }
+      ",
+    )
+  let assert Ok(definition) =
+    list.find(module.functions, fn(f) { f.definition.name == "map" })
+  let assert typed.Poly(
+    [_, _],
+    typed.FunctionType(
+      [typed.NamedType(_, "Box", [a]), typed.FunctionType([argument], return)],
+      typed.NarrowedType(typed.NamedType(_, "Box", [b]), _),
+    ),
+  ) = definition.definition.typ
+  assert a == argument
+  assert b == return
+  assert a != b
+}
+
+pub fn record_update_phantom_type_parameter_test() {
+  let module =
+    infer_with_prelude(
+      "
+      pub type Tagged(a) { Tagged(x: Int, y: Int) }
+
+      pub fn f(t) { Tagged(..t, x: t.y) }
+      ",
+    )
+  let assert [definition] = module.functions
+  let assert typed.Poly(
+    [_, _],
+    typed.FunctionType(
+      [typed.NamedType(_, "Tagged", [a])],
+      typed.NarrowedType(typed.NamedType(_, "Tagged", [b]), _),
+    ),
+  ) = definition.definition.typ
+  assert a != b
+}
+
+pub fn incomplete_record_update_error_test() {
+  let source =
+    "
+    pub type Pair(a) { Pair(x: a, y: a) }
+
+    pub fn f(pair: Pair(Int)) { Pair(..pair, x: \"s\") }
+    "
+  let assert typed.IncompleteRecordUpdate(
+    typed.Location(span: glance.Span(start, end), ..),
+    option.Some("y"),
+  ) = infer_error_with_prelude(source)
+  assert slice_bytes(source, start, end - start) == "pair"
+}
+
+pub fn incomplete_record_update_unlabelled_field_error_test() {
+  let assert typed.IncompleteRecordUpdate(_, option.None) =
+    infer_error_with_prelude(
+      "
+      pub type Pair(a) { Pair(a, y: a) }
+
+      pub fn f(pair: Pair(Int)) { Pair(..pair, y: \"s\") }
+      ",
+    )
+}
+
+@external(erlang, "binary", "part")
+fn slice_bytes(string: String, start: Int, length: Int) -> String
+
 pub fn refutable_let_pattern_error_test() {
   infer_error_with_prelude(
     "

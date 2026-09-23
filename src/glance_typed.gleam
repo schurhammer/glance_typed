@@ -533,6 +533,7 @@ pub type Error {
   NonExhaustiveCase(location: Location, missing: List(String))
   LetPatternNotExhaustive(location: Location, missing: List(String))
   UnsafeRecordUpdate(location: Location, constructor: String)
+  IncompleteRecordUpdate(location: Location, label: Option(String))
 }
 
 /// The reason an implicit `todo` expression was inserted.
@@ -1189,6 +1190,13 @@ pub fn inspect_error(error: Error) {
       "This value is not known to be a '"
       <> constructor
       <> "', so it cannot be updated with the record update syntax"
+    IncompleteRecordUpdate(label: Some(label), ..) ->
+      "The '"
+      <> label
+      <> "' field must also be updated, because this update changes its type"
+    IncompleteRecordUpdate(label: None, ..) ->
+      "This update changes the type of an unlabelled field, which the update "
+      <> "syntax cannot set. Construct a new record instead"
   }
 }
 
@@ -3574,17 +3582,21 @@ fn infer_expression(
         resolve_constructor(c, module, constructor),
       )
 
-      // Instantiate the constructor type
-      let #(c, constructor_type) = instantiate(c, poly)
-      use #(constructor_args, constructor_ret) <- result.try(
-        case constructor_type {
-          FunctionType(parameters:, return:) -> Ok(#(parameters, return))
-          _ -> Error(NotAFunction(context_location(c), constructor))
+      // Instantiate the constructor separately for the base record and the
+      // result, since updates are allowed to change the type args
+      let #(c, base_type) = instantiate(c, poly)
+      let #(c, result_type) = instantiate(c, poly)
+      use #(base_args, base_ret, result_args, result_ret) <- result.try(
+        case base_type, result_type {
+          FunctionType(base_args, base_ret),
+            FunctionType(result_args, result_ret)
+          -> Ok(#(base_args, base_ret, result_args, result_ret))
+          _, _ -> Error(NotAFunction(context_location(c), constructor))
         },
       )
 
       // Unify the base expression type with the constructor type
-      use c <- result.try(unify(c, base_expr.typ, constructor_ret))
+      use c <- result.try(unify(c, base_expr.typ, base_ret))
 
       // Updating a record is only safe when it cannot be some other variant
       use c <- result.try(check_record_update_safety(
@@ -3592,7 +3604,7 @@ fn infer_expression(
         base_expr,
         res_module,
         constructor,
-        constructor_ret,
+        base_ret,
       ))
 
       // Infer types for all updated fields
@@ -3614,7 +3626,7 @@ fn infer_expression(
 
       // Collect the labelled fields of the constructor
       let labelled_fields =
-        list.zip(labels, constructor_args)
+        list.zip(labels, result_args)
         |> list.filter_map(fn(pair) {
           case pair.0 {
             Some(label) -> Ok(#(label, pair.1))
@@ -3659,15 +3671,32 @@ fn infer_expression(
         }),
       )
 
+      // Fields that are not updated keep their type from the base record
+      let fields =
+        list.zip(list.zip(labels, matched), list.zip(base_args, result_args))
+      use c <- result.try(
+        list.try_fold(fields, c, fn(c, field) {
+          case field {
+            #(#(_, Some(_)), _) -> Ok(c)
+            #(#(label, None), #(base, result)) ->
+              unify(c, base, result)
+              |> result.replace_error(IncompleteRecordUpdate(
+                span_location(c, base_expr.location),
+                label,
+              ))
+          }
+        }),
+      )
+
       let positional_fields =
-        list.map2(matched, constructor_args, fn(m, expected) {
+        list.map2(matched, result_args, fn(m, expected) {
           case m {
             Some(value) -> UpdatedField(value)
             None -> UnchangedField(expected)
           }
         })
 
-      let #(_, base) = resolve_type(c, constructor_ret)
+      let #(_, base) = resolve_type(c, result_ret)
       let typ = NarrowedType(base, [VariantRef(res_module, constructor)])
 
       // Create the RecordUpdate expression
