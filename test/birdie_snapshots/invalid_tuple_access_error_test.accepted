@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: invalid tuple access error test
-file: ./test/glance_typed_test.gleam
-test_name: invalid_tuple_access_error_test
----
-Attempted tuple access on a non-tuple type

@@ -1,7 +1,0 @@
----
-version: 2.0.2
-title: assert statement with non string message error test
-file: ./test/glance_typed_test.gleam
-test_name: assert_statement_with_non_string_message_error_test
----
-Expected type String, found type Int

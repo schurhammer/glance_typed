@@ -51,12 +51,6 @@ fn infer_yaml_with_prelude(source: String) -> String {
 
 fn infer_error(source: String) -> typed.Error {
   let assert Ok(parsed) = glance.module(source)
-  let assert Error(err) = typed.infer_module(dict.new(), parsed, "test")
-  err
-}
-
-fn infer_error_with_prelude(source: String) -> typed.Error {
-  let assert Ok(parsed) = glance.module(source)
   let assert Error(err) = typed.infer_module(prelude_deps(), parsed, "test")
   err
 }
@@ -330,9 +324,8 @@ pub fn tuple_index_test() {
 }
 
 pub fn tuple_index_out_of_bounds_test() {
-  infer_error_with_prelude("pub fn f(t: #(Int, String)) { t.2 }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "tuple index out of bounds test")
+  assert error_message("pub fn f(t: #(Int, String)) { t.2 }")
+    == "Tuple index 2 exceeds the size of the tuple (2)"
 }
 
 pub fn anonymous_function_test() {
@@ -658,7 +651,7 @@ pub fn constructor_alias_preserves_variant_test() {
 
 pub fn compatible_function_parameter_is_not_narrowed_test() {
   let assert typed.NonExhaustiveCase(_, ["Absent"]) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Maybe(a) {
         Present(a)
@@ -677,7 +670,7 @@ pub fn compatible_function_parameter_is_not_narrowed_test() {
 
 pub fn constructor_variant_is_erased_by_annotated_function_test() {
   let assert typed.NonExhaustiveCase(_, ["Absent"]) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Maybe(a) {
         Present(a)
@@ -702,85 +695,74 @@ pub fn constructor_variant_is_erased_by_annotated_function_test() {
 }
 
 pub fn call_non_function_test() {
-  infer_error("pub fn f() { let x = 1  x(2) }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "call non function test")
+  assert error_message("pub fn f() { let x = 1  x(2) }")
+    == "Expected type fn(Int) -> a, found type Int"
 }
 
 pub fn function_call_wrong_arity_test() {
-  infer_error(
+  let source =
     "
     pub fn id(x) { x }
     pub fn f() { id(1, 2) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "function call wrong arity test")
+    "
+  assert error_message(source) == "Expected 1 argument(s), got 2"
 }
 
 pub fn unknown_variable_test() {
-  infer_error("pub fn f() { x }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "unknown variable test")
+  assert error_message("pub fn f() { x }")
+    == "Module value with name 'x' not found"
 }
 
 pub fn unresolved_type_test() {
-  infer_error("pub fn f(x: Foo) { x }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "unresolved type test")
+  assert error_message("pub fn f(x: Foo) { x }")
+    == "Type with name 'gleam.Foo' not found"
 }
 
 pub fn incompatible_types_test() {
-  infer_error("pub fn f() { case 1 { 1 -> 1  _ -> \"str\" } }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "incompatible types test")
+  assert error_message("pub fn f() { case 1 { 1 -> 1  _ -> \"str\" } }")
+    == "Expected type Int, found type String"
 }
 
 pub fn type_annotation_mismatch_test() {
-  infer_error(
+  let source =
     "
     type A { A }
     type B { B }
     pub fn f(x: A) -> B { x }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "type annotation mismatch test")
+    "
+  assert error_message(source) == "Expected type B, found type A"
 }
 
 pub fn label_not_found_test() {
-  infer_error(
+  let source =
     "
     pub fn id(x) { x }
     pub fn f() { id(y: 1) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "label not found test")
+    "
+  assert error_message(source) == "'y' is not a valid label"
 }
 
 pub fn recursive_type_error_test() {
-  infer_error(
+  let source =
     "
     pub fn f(x) {
       f(x(1))
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "recursive type error test")
+    "
+  assert error_message(source)
+    == "Encountered a cyclical dependency between type variables"
 }
 
 fn incompatible_types_at(source: String) -> String {
   let assert typed.IncompatibleTypes(
     location: typed.Location(span: glance.Span(start, end), ..),
     ..,
-  ) = infer_error_with_prelude(source)
+  ) = infer_error(source)
   slice_bytes(source, start, end - start)
 }
 
 fn error_message(source: String) -> String {
-  typed.inspect_error(infer_error_with_prelude(source))
+  typed.inspect_error(infer_error(source))
 }
 
 pub fn incompatible_types_reports_whole_types_test() {
@@ -1198,9 +1180,8 @@ pub fn constant_with_matching_annotation_test() {
 }
 
 pub fn constant_with_mismatched_annotation_test() {
-  infer_error_with_prelude("pub const x: String = 1")
-  |> typed.inspect_error
-  |> birdie.snap(title: "constant with mismatched annotation test")
+  assert error_message("pub const x: String = 1")
+    == "Expected type String, found type Int"
 }
 
 pub fn assert_statement_nil_type_test() {
@@ -1226,45 +1207,39 @@ pub fn assert_statement_with_message_nil_type_test() {
 }
 
 pub fn assert_statement_with_non_string_message_error_test() {
-  infer_error("pub fn f() { assert 1 == 1 as 5 }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "assert statement with non string message error test")
+  assert error_message("pub fn f() { assert 1 == 1 as 5 }")
+    == "Expected type String, found type Int"
 }
 
 pub fn record_update_unknown_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
     pub fn f(p: Point) { Point(..p, zzz: 1) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "record update unknown label error test")
+    "
+  assert error_message(source) == "'zzz' is not a valid label"
 }
 
 pub fn record_update_duplicate_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
     pub fn f(p: Point) { Point(..p, x: 1, x: 2) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "record update duplicate label error test")
+    "
+  assert error_message(source) == "The label 'x' has already been given a value"
 }
 
 pub fn record_update_unlabelled_constructor_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Pair { Pair(Int, Int) }
 
     pub fn f(p: Pair) { Pair(..p) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "record update unlabelled constructor error test")
+    "
+  assert error_message(source)
+    == "This constructor has no labelled fields, so it cannot be used with the update syntax"
 }
 
 pub fn record_update_no_fields_warning_test() {
@@ -1290,43 +1265,38 @@ pub fn record_update_all_fields_warning_test() {
 }
 
 pub fn call_duplicate_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub fn add(x x: Int, y y: Int) -> Int { x }
 
     pub fn f() { add(x: 1, x: 2) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "call duplicate label error test")
+    "
+  assert error_message(source) == "The label 'x' has already been given a value"
 }
 
 pub fn call_unknown_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub fn add(x x: Int, y y: Int) -> Int { x }
 
     pub fn f() { add(x: 1, zzz: 2) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "call unknown label error test")
+    "
+  assert error_message(source) == "'zzz' is not a valid label"
 }
 
 pub fn call_positional_after_labelled_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub fn add(x x: Int, y y: Int) -> Int { x }
 
     pub fn f() { add(x: 1, 2) }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "call positional after labelled error test")
+    "
+  assert error_message(source)
+    == "Positional arguments cannot follow a labelled argument"
 }
 
 pub fn pattern_positional_after_labelled_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
@@ -1334,14 +1304,13 @@ pub fn pattern_positional_after_labelled_error_test() {
       let Point(x: 1, 2) = p
       1
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "pattern positional after labelled error test")
+    "
+  assert error_message(source)
+    == "Positional arguments cannot follow a labelled argument"
 }
 
 pub fn pattern_spread_unknown_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
@@ -1349,14 +1318,12 @@ pub fn pattern_spread_unknown_label_error_test() {
       let Point(zzz: 1, ..) = p
       1
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "pattern spread unknown label error test")
+    "
+  assert error_message(source) == "'zzz' is not a valid label"
 }
 
 pub fn pattern_spread_duplicate_label_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
@@ -1364,14 +1331,12 @@ pub fn pattern_spread_duplicate_label_error_test() {
       let Point(x: 1, x: 2, ..) = p
       1
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "pattern spread duplicate label error test")
+    "
+  assert error_message(source) == "The label 'x' has already been given a value"
 }
 
 pub fn pattern_spread_positional_after_labelled_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
@@ -1379,10 +1344,9 @@ pub fn pattern_spread_positional_after_labelled_error_test() {
       let Point(x: 1, 2, ..) = p
       1
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "pattern spread positional after labelled error test")
+    "
+  assert error_message(source)
+    == "Positional arguments cannot follow a labelled argument"
 }
 
 pub fn pattern_spread_unnecessary_warning_test() {
@@ -1414,7 +1378,7 @@ pub fn pattern_spread_no_fields_warning_test() {
 }
 
 pub fn pattern_spread_too_many_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Point { Point(x: Int, y: Int) }
 
@@ -1422,10 +1386,8 @@ pub fn pattern_spread_too_many_error_test() {
       let Point(1, 2, 3, ..) = p
       1
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "pattern spread too many error test")
+    "
+  assert error_message(source) == "Expected 2 argument(s), got 3"
 }
 
 pub fn external_function_test() {
@@ -1502,53 +1464,44 @@ pub fn incomplete_use_with_tuple_pattern_warning_test() {
 }
 
 pub fn invalid_tuple_access_error_test() {
-  infer_error_with_prelude("pub fn f(x: Int) { x.0 }")
-  |> typed.inspect_error
-  |> birdie.snap(title: "invalid tuple access error test")
+  assert error_message("pub fn f(x: Int) { x.0 }")
+    == "Attempted tuple access on a non-tuple type"
 }
 
 pub fn invalid_field_access_error_test() {
-  infer_error(
+  let source =
     "
     pub fn mk_tuple() { #(1, 2) }
     pub fn f() { mk_tuple().foo }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "invalid field access error test")
+    "
+  assert error_message(source) == "Attempted field access on a non-record type"
 }
 
 pub fn field_not_found_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     type A { A(x: Int) }
     pub fn mk_a() { A(1) }
     pub fn f() { mk_a().y }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "field not found error test")
+    "
+  assert error_message(source) == "This record does not have a field named 'y'"
 }
 
 pub fn field_not_found_on_variable_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     type A { A(x: Int) }
     pub fn f() { let a = A(1)  a.y }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "field not found on variable error test")
+    "
+  assert error_message(source) == "This record does not have a field named 'y'"
 }
 
 pub fn unresolved_module_error_test() {
-  infer_error(
+  let source =
     "
     pub fn f() { unknown.foo }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "unresolved module error test")
+    "
+  assert error_message(source) == "Module with name 'unknown' not found"
 }
 
 fn record_module_dependencies() -> dict.Dict(String, typed.ModuleInterface) {
@@ -2101,7 +2054,7 @@ pub fn desugar_use_mixed_positional_and_labelled_test() {
 
 pub fn wrong_arity_reports_original_counts_test() {
   let assert typed.WrongArity(expected_arg_count: 2, actual_arg_count: 3, ..) =
-    infer_error_with_prelude(
+    infer_error(
       "
       fn f(a: Int, b: Int) -> Int { a }
       pub fn g() -> Int { f(1, 2, 3) }
@@ -2111,7 +2064,7 @@ pub fn wrong_arity_reports_original_counts_test() {
 
 pub fn wrong_arity_too_few_reports_original_counts_test() {
   let assert typed.WrongArity(expected_arg_count: 3, actual_arg_count: 1, ..) =
-    infer_error_with_prelude(
+    infer_error(
       "
       fn f(a: Int, b: Int, c: Int) -> Int { a }
       pub fn g() -> Int { f(1) }
@@ -2289,7 +2242,7 @@ pub fn type_shadowing_an_import_is_a_warning_test() {
 
 pub fn field_access_requires_field_in_every_variant_test() {
   let assert typed.InconsistentFieldAccess(name: "radius", ..) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Shape {
         Circle(radius: Int)
@@ -2302,7 +2255,7 @@ pub fn field_access_requires_field_in_every_variant_test() {
 
 pub fn field_access_requires_consistent_index_across_variants_test() {
   let assert typed.InconsistentFieldAccess(name: "value", ..) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Wrapper {
         A(tag: Int, value: Int)
@@ -2315,7 +2268,7 @@ pub fn field_access_requires_consistent_index_across_variants_test() {
 
 pub fn field_access_requires_consistent_type_across_variants_test() {
   let assert typed.InconsistentFieldAccess(name: "value", ..) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Wrapper {
         A(value: Int)
@@ -2356,7 +2309,7 @@ pub fn exhaustive_bool_case_test() {
 }
 
 pub fn inexhaustive_bool_case_error_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(b: Bool) -> Int {
       case b {
@@ -2370,7 +2323,7 @@ pub fn inexhaustive_bool_case_error_test() {
 }
 
 pub fn inexhaustive_result_case_error_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(r: Result(Int, String)) -> Int {
       case r {
@@ -2425,16 +2378,15 @@ pub fn exhaustive_bool_leaf_past_three_constructor_layers_test() {
 }
 
 pub fn alternatives_shared_name_conflicting_types_error_test() {
-  let assert typed.IncompatibleTypes(..) =
-    infer_error_with_prelude(
-      "
-      pub fn f(r: Result(Int, String)) -> String {
-        case r {
-          Ok(x) | Error(x) -> x <> \"!\"
-        }
+  let source =
+    "
+    pub fn f(r: Result(Int, String)) -> String {
+      case r {
+        Ok(x) | Error(x) -> x <> \"!\"
       }
-      ",
-    )
+    }
+    "
+  assert error_message(source) == "Expected type Int, found type String"
 }
 
 pub fn alternatives_compatible_shared_binding_test() {
@@ -2458,7 +2410,7 @@ pub fn alternatives_compatible_shared_binding_test() {
 
 pub fn alternatives_missing_name_in_second_alternative_test() {
   let assert typed.InconsistentAlternativeBindings(_, "x") =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub fn f(r: Result(Int, String)) -> Int {
         case r {
@@ -2471,7 +2423,7 @@ pub fn alternatives_missing_name_in_second_alternative_test() {
 
 pub fn alternatives_extra_name_in_second_alternative_test() {
   let assert typed.InconsistentAlternativeBindings(_, "y") =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub fn f(r: Result(Int, String)) -> String {
         case r {
@@ -2484,7 +2436,7 @@ pub fn alternatives_extra_name_in_second_alternative_test() {
 
 pub fn alternatives_bare_variable_must_match_alternatives_test() {
   let assert typed.InconsistentAlternativeBindings(_, "x") =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub fn f(r: Result(Int, String)) -> Int {
         case r {
@@ -2547,7 +2499,7 @@ pub fn multi_element_list_overlap_not_redundant_test() {
 
 pub fn multi_element_list_missing_witnesses_head_first_test() {
   let assert typed.NonExhaustiveCase(_, witnesses) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub fn f(xs: List(Bool)) -> Int {
         case xs {
@@ -2606,7 +2558,7 @@ pub fn recursive_type_domain_terminates_test() {
 
 pub fn missing_witness_precise_past_three_constructor_layers_test() {
   let assert typed.NonExhaustiveCase(_, ["Ok(Ok(Ok(Cat)))"]) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Pet {
         Dog(name: String)
@@ -2626,7 +2578,7 @@ pub fn missing_witness_precise_past_three_constructor_layers_test() {
 }
 
 pub fn inexhaustive_list_pattern_error_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(xs: List(Int)) -> Int {
       case xs {
@@ -2640,7 +2592,7 @@ pub fn inexhaustive_list_pattern_error_test() {
 }
 
 pub fn inexhaustive_multi_subject_error_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(b: Bool, i: Int) -> Int {
       case b, i {
@@ -2655,7 +2607,7 @@ pub fn inexhaustive_multi_subject_error_test() {
 }
 
 pub fn inexhaustive_int_case_suggests_wildcard_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(n: Int) -> Int {
       case n {
@@ -2670,7 +2622,7 @@ pub fn inexhaustive_int_case_suggests_wildcard_test() {
 
 pub fn guarded_clauses_do_not_cover_test() {
   let assert typed.NonExhaustiveCase(_, ["True"]) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub fn f(value: Bool, condition: Bool) -> Int {
         case value {
@@ -2809,7 +2761,7 @@ pub fn opaque_pattern_does_not_make_wildcard_unreachable_test() {
 }
 
 pub fn refutable_plain_let_of_opaque_pattern_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(bits: BitArray) {
       let <<a, b, _:bytes>> = bits
@@ -2822,7 +2774,7 @@ pub fn refutable_plain_let_of_opaque_pattern_test() {
 }
 
 pub fn opaque_only_case_is_inexhaustive_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub fn f(s: String) -> Int {
       case s {
@@ -3045,7 +2997,7 @@ pub fn multi_subject_alternatives_narrowing_test() {
 }
 
 pub fn alternatives_union_variants_without_narrowing_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Maybe(a) {
       Present(value: a)
@@ -3057,10 +3009,9 @@ pub fn alternatives_union_variants_without_narrowing_test() {
         Present(..) | Absent -> maybe.value
       }
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "alternatives union variants without narrowing test")
+    "
+  assert error_message(source)
+    == "The field 'value' is not present at the same position with the same type in every variant of this custom type"
 }
 
 pub fn echo_subject_variant_narrowing_test() {
@@ -3083,7 +3034,7 @@ pub fn echo_subject_variant_narrowing_test() {
 }
 
 pub fn unsafe_record_update_error_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Shape {
       Circle(radius: Float)
@@ -3093,10 +3044,9 @@ pub fn unsafe_record_update_error_test() {
     pub fn f(shape: Shape) -> Shape {
       Rect(..shape, width: 1.0)
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "unsafe record update error test")
+    "
+  assert error_message(source)
+    == "This value is not known to be a 'Rect', so it cannot be updated with the record update syntax"
 }
 
 pub fn record_update_after_narrowing_test() {
@@ -3190,13 +3140,13 @@ pub fn incomplete_record_update_error_test() {
   let assert typed.IncompleteRecordUpdate(
     typed.Location(span: glance.Span(start, end), ..),
     option.Some("y"),
-  ) = infer_error_with_prelude(source)
+  ) = infer_error(source)
   assert slice_bytes(source, start, end - start) == "pair"
 }
 
 pub fn incomplete_record_update_unlabelled_field_error_test() {
   let assert typed.IncompleteRecordUpdate(_, option.None) =
-    infer_error_with_prelude(
+    infer_error(
       "
       pub type Pair(a) { Pair(a, y: a) }
 
@@ -3209,7 +3159,7 @@ pub fn incomplete_record_update_unlabelled_field_error_test() {
 fn slice_bytes(string: String, start: Int, length: Int) -> String
 
 pub fn refutable_let_pattern_error_test() {
-  infer_error_with_prelude(
+  infer_error(
     "
     pub type Shape {
       Circle(radius: Float)
@@ -3371,7 +3321,7 @@ pub fn constructor_return_variant_inference_test() {
 }
 
 pub fn annotated_return_erases_variant_test() {
-  infer_error_with_prelude(
+  let source =
     "
     pub type Pet {
       Dog(name: String, cuteness: Int)
@@ -3385,8 +3335,7 @@ pub fn annotated_return_erases_variant_test() {
     pub fn via_function() {
       mk_dog().cuteness
     }
-    ",
-  )
-  |> typed.inspect_error
-  |> birdie.snap(title: "annotated return erases variant test")
+    "
+  assert error_message(source)
+    == "The field 'cuteness' is not present at the same position with the same type in every variant of this custom type"
 }

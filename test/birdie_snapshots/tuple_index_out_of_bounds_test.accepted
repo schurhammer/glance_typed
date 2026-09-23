@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: tuple index out of bounds test
-file: ./test/glance_typed_test.gleam
-test_name: tuple_index_out_of_bounds_test
----
-Tuple index 2 exceeds the size of the tuple (2)

@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: invalid field access error test
-file: ./test/glance_typed_test.gleam
-test_name: invalid_field_access_error_test
----
-Attempted field access on a non-record type

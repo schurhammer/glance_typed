@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: unresolved type test
-file: ./test/glance_typed_test.gleam
-test_name: unresolved_type_test
----
-Type with name 'gleam.Foo' not found

@@ -1,7 +1,0 @@
----
-version: 2.0.2
-title: call non function test
-file: ./test/glance_typed_test.gleam
-test_name: call_non_function_test
----
-Expected type fn(Int) -> a, found type Int

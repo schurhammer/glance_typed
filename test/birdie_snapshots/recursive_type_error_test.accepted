@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: recursive type error test
-file: ./test/glance_typed_test.gleam
-test_name: recursive_type_error_test
----
-Encountered a cyclical dependency between type variables

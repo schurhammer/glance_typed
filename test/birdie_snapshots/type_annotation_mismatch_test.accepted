@@ -1,7 +1,0 @@
----
-version: 2.0.2
-title: type annotation mismatch test
-file: ./test/glance_typed_test.gleam
-test_name: type_annotation_mismatch_test
----
-Expected type B, found type A

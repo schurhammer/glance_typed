@@ -1,7 +1,0 @@
----
-version: 1.5.4
-title: unresolved module error test
-file: ./test/glance_typed_test.gleam
-test_name: unresolved_module_error_test
----
-Module with name 'unknown' not found

@@ -1,7 +1,0 @@
----
-version: 2.0.2
-title: incompatible types test
-file: ./test/glance_typed_test.gleam
-test_name: incompatible_types_test
----
-Expected type Int, found type String
