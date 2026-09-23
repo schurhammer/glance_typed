@@ -4057,52 +4057,34 @@ fn infer_expression(
     }
     g.BinaryOperator(location:, name:, left:, right:) -> {
       let name = map_binop(name)
-      let #(c, fun_typ) = case name {
-        // Boolean logic
-        And | Or -> {
-          #(c, FunctionType([bool_type, bool_type], bool_type))
-        }
-
-        // Equality
+      let #(c, operand, typ) = case name {
+        And | Or -> #(c, bool_type, bool_type)
         Eq | NotEq -> {
           let #(c, a) = new_type_var_ref(c)
-          #(c, FunctionType([a, a], bool_type))
+          #(c, a, bool_type)
         }
-
-        // Order comparison
-        LtInt | LtEqInt | GtEqInt | GtInt -> {
-          #(c, FunctionType([int_type, int_type], bool_type))
-        }
-
-        LtFloat | LtEqFloat | GtEqFloat | GtFloat -> {
-          #(c, FunctionType([float_type, float_type], bool_type))
-        }
-
-        // Maths
-        AddInt | SubInt | MultInt | DivInt | RemainderInt -> {
-          #(c, FunctionType([int_type, int_type], int_type))
-        }
-
-        AddFloat | SubFloat | MultFloat | DivFloat -> {
-          #(c, FunctionType([float_type, float_type], float_type))
-        }
-
-        // Strings
-        Concatenate -> {
-          #(c, FunctionType([string_type, string_type], string_type))
-        }
+        LtInt | LtEqInt | GtEqInt | GtInt -> #(c, int_type, bool_type)
+        LtFloat | LtEqFloat | GtEqFloat | GtFloat -> #(c, float_type, bool_type)
+        AddInt | SubInt | MultInt | DivInt | RemainderInt -> #(
+          c,
+          int_type,
+          int_type,
+        )
+        AddFloat | SubFloat | MultFloat | DivFloat -> #(
+          c,
+          float_type,
+          float_type,
+        )
+        Concatenate -> #(c, string_type, string_type)
       }
 
+      // unify each operand as soon as it is inferred so errors point at it
       use #(c, left) <- result.try(infer_expression(c, n, left))
+      let c = Context(..c, current_span: left.location)
+      use c <- result.try(unify(c, operand, left.typ))
       use #(c, right) <- result.try(infer_expression(c, n, right))
-
-      // unify the function type with the types of args
-      let #(c, typ) = new_type_var_ref(c)
-      use c <- result.map(unify(
-        c,
-        fun_typ,
-        FunctionType([left.typ, right.typ], typ),
-      ))
+      let c = Context(..c, current_span: right.location)
+      use c <- result.map(unify(c, operand, right.typ))
 
       #(c, BinaryOperator(typ, location, name, left, right))
     }
