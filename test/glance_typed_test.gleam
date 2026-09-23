@@ -771,6 +771,101 @@ pub fn recursive_type_error_test() {
   |> birdie.snap(title: "recursive type error test")
 }
 
+fn incompatible_types_at(source: String) -> String {
+  let assert typed.IncompatibleTypes(
+    location: typed.Location(span: glance.Span(start, end), ..),
+    ..,
+  ) = infer_error_with_prelude(source)
+  slice_bytes(source, start, end - start)
+}
+
+pub fn generic_annotation_cannot_specialise_test() {
+  assert incompatible_types_at("pub fn f(x: a) -> a { 1 }") == "1"
+}
+
+pub fn distinct_generic_annotations_cannot_unify_test() {
+  assert incompatible_types_at("pub fn f(x: a) -> b { x }") == "x"
+}
+
+pub fn recursive_call_cannot_specialise_generic_test() {
+  assert incompatible_types_at("pub fn f(x: a) { f(1) }") == "1"
+}
+
+pub fn let_annotation_shares_function_type_variables_test() {
+  assert incompatible_types_at("pub fn f(x: a) { let y: a = 1 y }") == "1"
+}
+
+pub fn let_annotation_type_variable_is_generic_test() {
+  assert incompatible_types_at(
+      "pub fn f() -> List(Int) { let y: List(a) = [] y }",
+    )
+    == "y"
+}
+
+pub fn anonymous_fn_sees_outer_type_variables_test() {
+  let _ = infer("pub fn f(y: a) { fn(x: a) -> a { y } }")
+  assert incompatible_types_at("pub fn f(y: b) { fn(x: a) -> a { y } }") == "y"
+}
+
+pub fn anonymous_fn_generic_annotation_cannot_specialise_test() {
+  assert incompatible_types_at("pub fn f() { fn(x: a) -> a { 1 } }") == "1"
+}
+
+pub fn anonymous_fn_generic_annotation_against_hint_test() {
+  assert incompatible_types_at(
+      "pub fn map(xs: List(a), f: fn(a) -> b) -> List(b) { todo }
+       pub fn f() { map([1], fn(x: a) -> a { x }) }",
+    )
+    == "fn(x: a) -> a { x }"
+}
+
+pub fn anonymous_fn_type_variables_are_ordinary_outside_test() {
+  let _ =
+    infer_with_prelude("pub fn f() { let id = fn(x: a) -> a { x } id(1) }")
+}
+
+pub fn anonymous_fn_let_annotation_is_ordinary_outside_test() {
+  let _ =
+    infer_with_prelude(
+      "pub fn f() { let g = fn() { let y: a = todo y } g() + 1 }",
+    )
+}
+
+pub fn block_let_annotation_is_ordinary_outside_test() {
+  let _ = infer_with_prelude("pub fn f(p) { let _ = { let x: a = p x } p + 1 }")
+}
+
+pub fn case_clause_let_annotation_is_ordinary_outside_test() {
+  let _ =
+    infer_with_prelude(
+      "pub fn f(p) { let _ = case 1 { _ -> { let x: a = p x } } p + 1 }",
+    )
+}
+
+pub fn block_let_annotation_cannot_specialise_test() {
+  assert incompatible_types_at(
+      "pub fn f(p) { { let x: a = p  let y: Int = p  #(x, y) } }",
+    )
+    == "p"
+}
+
+pub fn generic_identity_remains_polymorphic_test() {
+  let module =
+    infer_with_prelude(
+      "pub fn id(x: a) -> a { x } pub fn main() { #(id(1), id(\"s\")) }",
+    )
+  let assert Ok(definition) =
+    list.find(module.functions, fn(f) { f.definition.name == "id" })
+  let assert typed.Poly([variable], typed.FunctionType([argument], return)) =
+    definition.definition.typ
+  assert argument == typed.VariableType(variable)
+  assert return == argument
+}
+
+pub fn mutually_recursive_generic_annotations_test() {
+  let _ = infer_with_prelude("pub fn f(x: a) { g(1) } pub fn g(x: b) { f(x) }")
+}
+
 pub fn negate_int_test() {
   infer_yaml_with_prelude("pub fn f(n: Int) { -n }")
   |> birdie.snap(title: "negate int test")

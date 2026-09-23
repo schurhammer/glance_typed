@@ -32,7 +32,8 @@ pub type TypeVarId {
   TypeVarId(id: Int)
 }
 
-pub type TypeVar {
+type TypeVar {
+  Generic(name: String)
   Bound(Type)
   Unbound
 }
@@ -594,11 +595,21 @@ type Context {
     type_origin: Dict(QualifiedName, Origin),
     value_env: Dict(QualifiedName, ModuleValue),
     value_origin: Dict(QualifiedName, Origin),
+    function_type_variables: Dict(String, TypeEnv),
   )
 }
 
-type LocalEnv =
-  Dict(String, Type)
+type LocalEnv {
+  LocalEnv(values: Dict(String, Type), type_variables: TypeEnv)
+}
+
+fn new_local_env() -> LocalEnv {
+  LocalEnv(dict.new(), dict.new())
+}
+
+fn bind_local(n: LocalEnv, name: String, typ: Type) -> LocalEnv {
+  LocalEnv(..n, values: dict.insert(n.values, name, typ))
+}
 
 type TypeEnv =
   Dict(String, Type)
@@ -843,11 +854,18 @@ pub fn infer_module(
       ))
 
       // create placeholder function type based on function signature
-      use #(c, parameters, return) <- result.map(infer_function_parameters(
-        c,
-        fun.parameters,
-        fun.return,
-      ))
+      use #(c, type_variables, parameters, return) <- result.map(
+        infer_function_parameters(c, dict.new(), fun.parameters, fun.return),
+      )
+      let c =
+        Context(
+          ..c,
+          function_type_variables: dict.insert(
+            c.function_type_variables,
+            fun.name,
+            type_variables,
+          ),
+        )
 
       let #(c, return_type) = annotation_type_or_new(c, return)
 
@@ -1059,6 +1077,7 @@ fn new_context(module_name: String) -> Context {
     type_origin: dict.new(),
     value_env: dict.new(),
     value_origin: dict.new(),
+    function_type_variables: dict.new(),
   )
 }
 
@@ -1307,7 +1326,7 @@ fn infer_constant(
   c: Context,
   con: g.Constant,
 ) -> Result(#(Context, ConstantDefinition), Error) {
-  use #(c, value) <- result.try(infer_expression(c, dict.new(), con.value))
+  use #(c, value) <- result.try(infer_expression(c, new_local_env(), con.value))
 
   let publicity = case con.publicity {
     g.Public -> Public
@@ -1348,19 +1367,21 @@ fn infer_function(
   let is_external =
     list.any(def.attributes, fn(attr) { attr.name == "external" })
   let fun = def.definition
-  use #(c, parameters, return) <- result.try(infer_function_parameters(
-    c,
-    fun.parameters,
-    fun.return,
-  ))
+
+  // share annotation variables with the placeholder used by recursive calls
+  let type_variables =
+    dict.get(c.function_type_variables, fun.name) |> result.unwrap(dict.new())
+  use #(c, type_variables, parameters, return) <- result.try(
+    infer_function_parameters(c, type_variables, fun.parameters, fun.return),
+  )
 
   let #(c, return_type) = annotation_type_or_new(c, return)
 
   // put params into local env
   let n =
-    list.fold(parameters, dict.new(), fn(n, param) {
+    list.fold(parameters, LocalEnv(dict.new(), type_variables), fn(n, param) {
       case param.name {
-        Named(name) -> dict.insert(n, name, param.typ)
+        Named(name) -> bind_local(n, name, param.typ)
         Discarded(_) -> n
       }
     })
@@ -1553,11 +1574,21 @@ fn find_vars_in_type(t: g.Type) -> List(String) {
 
 fn infer_function_parameters(
   c: Context,
+  type_env: TypeEnv,
   parameters: List(g.FunctionParameter),
   return: Option(g.Type),
-) -> Result(#(Context, List(FunctionParameter), Option(Annotation)), Error) {
+) -> Result(
+  #(Context, TypeEnv, List(FunctionParameter), Option(Annotation)),
+  Error,
+) {
   let #(c, type_env) =
-    build_type_env(c, list.map(parameters, fn(p) { p.type_ }), return)
+    add_annotation_variables(
+      c,
+      type_env,
+      option.values(
+        list.map(parameters, fn(p) { p.type_ }) |> list.append([return]),
+      ),
+    )
 
   // create type vars for parameters
   use #(c, params) <- result.try(
@@ -1584,7 +1615,7 @@ fn infer_function_parameters(
   // handle function return type
   use #(c, return) <- result.map(infer_optional_annotation(c, type_env, return))
 
-  #(c, params, return)
+  #(c, type_env, params, return)
 }
 
 fn infer_optional_annotation(
@@ -1601,28 +1632,22 @@ fn infer_optional_annotation(
   }
 }
 
-fn build_type_env(
+fn add_annotation_variables(
   c: Context,
-  param_types: List(Option(g.Type)),
-  return_type: Option(g.Type),
-) -> #(Context, Dict(String, Type)) {
-  let vars =
-    list.flat_map(param_types, fn(t) {
-      case t {
-        Some(typ) -> find_vars_in_type(typ)
-        None -> []
+  type_env: TypeEnv,
+  types: List(g.Type),
+) -> #(Context, TypeEnv) {
+  list.flat_map(types, find_vars_in_type)
+  |> list.unique
+  |> list.fold(#(c, type_env), fn(acc, name) {
+    let #(c, type_env) = acc
+    case dict.has_key(type_env, name) {
+      True -> acc
+      False -> {
+        let #(c, typ) = new_generic_var(c, name)
+        #(c, dict.insert(type_env, name, typ))
       }
-    })
-  let vars = case return_type {
-    Some(ret) -> list.append(find_vars_in_type(ret), vars)
-    None -> vars
-  }
-  let vars = list.unique(vars)
-  list.fold(vars, #(c, dict.new()), fn(acc, name) {
-    let #(c, n) = acc
-    let #(c, typ) = new_type_var_ref(c)
-    let n = dict.insert(n, name, typ)
-    #(c, n)
+    }
   })
 }
 
@@ -1759,7 +1784,7 @@ fn resolve_unqualified_name(
   n: LocalEnv,
   name: String,
 ) -> Result(ResolvedVariable, Error) {
-  dict.get(n, name)
+  dict.get(n.values, name)
   |> result.map(ResolvedLocal(name, _))
   |> result.try_recover(fn(_) {
     resolve_unqualified_module_value(c, name) |> result.map(ResolvedModuleValue)
@@ -1858,8 +1883,16 @@ fn new_temp_var(c: Context) -> #(Context, String) {
 }
 
 fn new_type_var_ref(c: Context) {
+  new_type_var(c, Unbound)
+}
+
+fn new_generic_var(c: Context, name: String) {
+  new_type_var(c, Generic(name))
+}
+
+fn new_type_var(c: Context, var: TypeVar) {
   let ref = TypeVarId(c.type_uid)
-  let type_vars = dict.insert(c.type_vars, ref, Unbound)
+  let type_vars = dict.insert(c.type_vars, ref, var)
   let typ = VariableType(ref)
   #(Context(..c, type_vars:, type_uid: c.type_uid + 1), typ)
 }
@@ -1942,7 +1975,7 @@ fn infer_pattern(
     g.PatternVariable(location:, name:) -> {
       let #(c, typ) = new_type_var_ref(c)
       let pattern = PatternVariable(typ, location, name)
-      let n = dict.insert(n, name, typ)
+      let n = bind_local(n, name, typ)
       Ok(#(c, n, pattern))
     }
     g.PatternTuple(location:, elements:) -> {
@@ -2004,7 +2037,7 @@ fn infer_pattern(
       let pattern = PatternAssignment(pattern.typ, location, pattern, name)
 
       // Add the name binding to the environment
-      let n = dict.insert(n, name, pattern.typ)
+      let n = bind_local(n, name, pattern.typ)
 
       #(c, n, pattern)
     }
@@ -2012,7 +2045,7 @@ fn infer_pattern(
       // Add prefix_name to the environment if applicable
       let #(n, prefix_name) = case prefix_name {
         Some(g.Named(name)) -> {
-          let n = dict.insert(n, name, string_type)
+          let n = bind_local(n, name, string_type)
           #(n, Some(Named(name)))
         }
         Some(g.Discarded(name)) -> #(n, Some(Discarded(name)))
@@ -2022,7 +2055,7 @@ fn infer_pattern(
       // Add rest_name to the environment if applicable
       let #(n, rest_name_result) = case rest_name {
         g.Named(name) -> {
-          let n = dict.insert(n, name, string_type)
+          let n = bind_local(n, name, string_type)
           #(n, Named(name))
         }
         g.Discarded(name) -> #(n, Discarded(name))
@@ -2337,8 +2370,8 @@ fn narrow_at_path(
 ) -> LocalEnv {
   case path {
     SubjectVar(name) ->
-      case dict.get(n, name) {
-        Ok(typ) -> dict.insert(n, name, narrow_type(typ, variants))
+      case dict.get(n.values, name) {
+        Ok(typ) -> bind_local(n, name, narrow_type(typ, variants))
         Error(_) -> n
       }
     SubjectTuple(elements) ->
@@ -2472,7 +2505,7 @@ fn narrowed_domains(
   list.map2(paths, domains, fn(path, domain) {
     let known = case path {
       Ok(SubjectVar(name)) ->
-        dict.get(n, name)
+        dict.get(n.values, name)
         |> result.map(known_variants)
         |> result.unwrap([])
       _ -> []
@@ -2617,7 +2650,7 @@ fn bind_pattern_variables(
 fn bind_names(n: LocalEnv, bindings: List(#(String, Type))) -> LocalEnv {
   list.fold(bindings, n, fn(n, binding) {
     let #(name, binding_type) = binding
-    dict.insert(n, name, binding_type)
+    bind_local(n, name, binding_type)
   })
 }
 
@@ -3040,22 +3073,13 @@ fn resolve_constructor(
 
 fn infer_annotation(
   c: Context,
+  n: LocalEnv,
   typ: g.Type,
-) -> Result(#(Context, Annotation), Error) {
-  let vars =
-    find_vars_in_type(typ)
-    |> list.unique()
-    |> list.sort(string.compare)
-
-  let #(c, type_env) =
-    list.fold(vars, #(c, dict.new()), fn(acc, name) {
-      let #(c, n) = acc
-      let #(c, typ) = new_type_var_ref(c)
-      let n = dict.insert(n, name, typ)
-      #(c, n)
-    })
-
-  do_infer_annotation(c, type_env, typ)
+) -> Result(#(Context, LocalEnv, Annotation), Error) {
+  let #(c, type_variables) =
+    add_annotation_variables(c, n.type_variables, [typ])
+  use #(c, annotation) <- result.map(do_infer_annotation(c, type_variables, typ))
+  #(c, LocalEnv(..n, type_variables:), annotation)
 }
 
 fn infer_body(
@@ -3084,13 +3108,13 @@ fn infer_body(
           use #(c, n, pattern) <- result.try(infer_pattern(c, n, pattern))
 
           // if there is an annotation, the pattern must unify with the annotation
-          use #(c, annotation) <- result.try(case annotation {
+          use #(c, n, annotation) <- result.try(case annotation {
             Some(typ) -> {
-              use #(c, annotation) <- result.try(infer_annotation(c, typ))
+              use #(c, n, annotation) <- result.try(infer_annotation(c, n, typ))
               use c <- result.map(unify(c, pattern.typ, annotation.typ))
-              #(c, Some(annotation))
+              #(c, n, Some(annotation))
             }
-            None -> Ok(#(c, None))
+            None -> Ok(#(c, n, None))
           })
 
           // the pattern must unify with both the annotation
@@ -3452,6 +3476,7 @@ fn infer_expression(
           case module_value {
             ModuleFunction(module, name, typ, labels) -> {
               let #(c, typ) = instantiate(c, typ)
+              let #(c, typ) = instantiate_other_generics(c, n, typ)
               // Record the exact variant produced by a constructor.
               let typ = narrow_constructor_result(c, module, name, typ)
               Ok(#(c, Function(typ, location, module, name, labels)))
@@ -3478,12 +3503,14 @@ fn infer_expression(
       #(c, NegateBool(bool_type, location, e))
     }
     g.Block(location:, statements:) -> {
+      let first_type_var = c.type_uid
       use #(c, statements) <- result.try(infer_body_or_todo(
         c,
         n,
         statements,
         EmptyBlock,
       ))
+      let c = release_type_variables(c, first_type_var)
       let assert Some(typ) = body_type(statements)
       Ok(#(c, Block(typ, location, statements)))
     }
@@ -4278,18 +4305,17 @@ fn index_into_list(list: List(a), index: Int) -> Result(a, Nil) {
 
 fn infer_fn(
   c: Context,
-  n: Dict(String, Type),
+  n: LocalEnv,
   location: Span,
   parameters: List(g.FnParameter),
   return_annotation: Option(g.Type),
   body: List(g.Statement),
   hint: Option(Type),
 ) -> Result(#(Context, Expression), Error) {
-  use #(c, parameters, return_annotation) <- result.try(infer_fn_parameters(
-    c,
-    parameters,
-    return_annotation,
-  ))
+  let first_type_var = c.type_uid
+  use #(c, type_variables, parameters, return_annotation) <- result.try(
+    infer_fn_parameters(c, n.type_variables, parameters, return_annotation),
+  )
 
   let #(c, return_type) = annotation_type_or_new(c, return_annotation)
 
@@ -4299,15 +4325,15 @@ fn infer_fn(
 
   // unify parameters with type hint
   use c <- result.try(case hint {
-    Some(hint) -> unify(c, typ, hint)
+    Some(hint) -> unify(Context(..c, current_span: location), typ, hint)
     None -> Ok(c)
   })
 
   // put params into local env
   let n =
-    list.fold(parameters, n, fn(n, param) {
+    list.fold(parameters, LocalEnv(..n, type_variables:), fn(n, param) {
       case param.name {
-        Named(name) -> dict.insert(n, name, param.typ)
+        Named(name) -> bind_local(n, name, param.typ)
         Discarded(_) -> n
       }
     })
@@ -4317,6 +4343,8 @@ fn infer_fn(
 
   // unify the return type with the last statement
   use c <- result.map(unify_body_return(c, return_type, body))
+
+  let c = release_type_variables(c, first_type_var)
 
   let typ = case return_annotation, body_type(body) {
     None, Some(tail) ->
@@ -4328,13 +4356,29 @@ fn infer_fn(
   #(c, fun)
 }
 
+fn release_type_variables(c: Context, first: Int) -> Context {
+  int.range(first, c.type_uid, c, fn(c, id) {
+    case get_type_var(c, TypeVarId(id)) {
+      Generic(_) -> set_type_var(c, TypeVarId(id), Unbound)
+      _ -> c
+    }
+  })
+}
+
 fn infer_fn_parameters(
   c: Context,
+  type_env: TypeEnv,
   parameters: List(g.FnParameter),
   return: Option(g.Type),
-) -> Result(#(Context, List(FnParameter), Option(Annotation)), Error) {
+) -> Result(#(Context, TypeEnv, List(FnParameter), Option(Annotation)), Error) {
   let #(c, type_env) =
-    build_type_env(c, list.map(parameters, fn(p) { p.type_ }), return)
+    add_annotation_variables(
+      c,
+      type_env,
+      option.values(
+        list.map(parameters, fn(p) { p.type_ }) |> list.append([return]),
+      ),
+    )
 
   // create type vars for parameters
   use #(c, params) <- result.try(
@@ -4359,7 +4403,7 @@ fn infer_fn_parameters(
   // handle function return type
   use #(c, return) <- result.map(infer_optional_annotation(c, type_env, return))
 
-  #(c, params, return)
+  #(c, type_env, params, return)
 }
 
 type PolyEnv =
@@ -4387,12 +4431,29 @@ fn instantiate(c: Context, poly: Poly) -> #(Context, Type) {
   #(c, typ)
 }
 
+fn instantiate_other_generics(
+  c: Context,
+  n: LocalEnv,
+  typ: Type,
+) -> #(Context, Type) {
+  let in_scope = dict.values(n.type_variables)
+  let vars =
+    list.unique(find_tvs(c, typ))
+    |> list.filter(fn(ref) {
+      case get_type_var(c, ref) {
+        Generic(_) -> !list.contains(in_scope, VariableType(ref))
+        _ -> False
+      }
+    })
+  instantiate(c, Poly(vars, typ))
+}
+
 fn find_tvs(c: Context, t: Type) -> List(TypeVarId) {
   case t {
     VariableType(ref) ->
       case get_type_var(c, ref) {
         Bound(x) -> find_tvs(c, x)
-        Unbound -> [ref]
+        Unbound | Generic(_) -> [ref]
       }
     NamedType(_, _, args) -> list.flat_map(args, find_tvs(c, _))
     FunctionType(args, ret) -> list.flat_map([ret, ..args], find_tvs(c, _))
@@ -4409,7 +4470,7 @@ fn do_instantiate(c: Context, n: PolyEnv, typ: Type) -> Type {
         Error(_) ->
           case get_type_var(c, ref) {
             Bound(x) -> do_instantiate(c, n, x)
-            Unbound -> typ
+            Unbound | Generic(_) -> typ
           }
       }
     NamedType(module:, name:, parameters:) ->
@@ -4434,10 +4495,16 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
   let #(c, a) = resolve_type(c, a)
   let #(c, b) = resolve_type(c, b)
   case a, b {
-    VariableType(ref), b ->
-      case a == b {
-        True -> Ok(c)
-        False -> {
+    _, _ if a == b -> Ok(c)
+    VariableType(ref), _ ->
+      case get_type_var(c, ref), b {
+        Generic(_), VariableType(other) ->
+          case get_type_var(c, other) {
+            Generic(_) -> Error(IncompatibleTypes(context_location(c), a, b))
+            _ -> unify(c, b, a)
+          }
+        Generic(_), _ -> Error(IncompatibleTypes(context_location(c), a, b))
+        _, _ -> {
           let #(c, occurs) = occurs(c, ref, b)
           case occurs {
             True -> Error(RecursiveTypeError(context_location(c)))
@@ -4445,7 +4512,7 @@ fn unify(c: Context, a: Type, b: Type) -> Result(Context, Error) {
           }
         }
       }
-    a, VariableType(_) -> unify(c, b, a)
+    _, VariableType(_) -> unify(c, b, a)
     NamedType(amodule, aname, _), NamedType(bmodule, bname, _)
       if aname != bname || amodule != bmodule
     -> Error(IncompatibleTypes(context_location(c), a, b))
@@ -4523,7 +4590,7 @@ fn resolve_type(c: Context, typ: Type) -> #(Context, Type) {
             _ -> #(c, inner)
           }
         }
-        Unbound -> #(c, typ)
+        Unbound | Generic(_) -> #(c, typ)
       }
     }
     NarrowedType(typ, _) -> resolve_type(c, typ)
@@ -5027,7 +5094,7 @@ fn substitute_type(c: Context, rename: Dict(TypeVarId, TypeVarId), typ: Type) {
     VariableType(ref) -> {
       case get_type_var(c, ref) {
         Bound(x) -> substitute_type(c, rename, x)
-        Unbound ->
+        Unbound | Generic(_) ->
           case dict.get(rename, ref) {
             Ok(new_ref) -> VariableType(new_ref)
             Error(Nil) -> {
