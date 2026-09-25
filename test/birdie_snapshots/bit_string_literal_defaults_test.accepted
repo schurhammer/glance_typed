@@ -1,0 +1,65 @@
+---
+version: 2.0.2
+title: bit string literal defaults test
+file: ./test/glance_typed_test.gleam
+test_name: bit_string_literal_defaults_test
+---
+---
+name: test
+functions:
+- name: f
+  type: "() fn(gleam.BitArray) -> gleam.BitArray"
+  publicity: public
+  parameters:
+  - type: "gleam.BitArray"
+    name: bits
+    annotation:
+      annotation: BitArray
+      type: "gleam.BitArray"
+  body:
+  - kind: case
+    type: "gleam.BitArray"
+    subjects:
+    - kind: local_variable
+      type: "gleam.BitArray"
+      name: bits
+    clauses:
+    - patterns:
+      -
+        - kind: bit_string_pattern
+          type: "gleam.BitArray"
+          segments:
+          - pattern:
+              kind: string_pattern
+              type: "gleam.String"
+              value: a
+          - pattern:
+              kind: float_pattern
+              type: "gleam.Float"
+              value: "1.5"
+          - pattern:
+              kind: discard_pattern
+              type: "gleam.BitArray"
+            options:
+            - bits
+      body:
+        kind: bit_string
+        type: "gleam.BitArray"
+        segments:
+        - expression:
+            kind: string_literal
+            type: "gleam.String"
+            value: b
+        - expression:
+            kind: float_literal
+            type: "gleam.Float"
+            value: "2.5"
+    - patterns:
+      -
+        - kind: discard_pattern
+          type: "gleam.BitArray"
+      body:
+        kind: local_variable
+        type: "gleam.BitArray"
+        name: bits
+

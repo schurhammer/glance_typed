@@ -2150,10 +2150,11 @@ fn infer_pattern(
           )
           let options = list.reverse(options)
 
-          // If no type option was specified, default to int_type
-          let expected_type = case typ {
-            Some(t) -> t
-            None -> int_type
+          let expected_type = case typ, pattern {
+            Some(t), _ -> t
+            None, g.PatternString(..) -> string_type
+            None, g.PatternFloat(..) -> float_type
+            None, _ -> int_type
           }
 
           use #(c, n, pattern) <- result.try(infer_pattern(c, n, pattern))
@@ -3957,9 +3958,11 @@ fn infer_expression(
             }),
           )
           let options = list.reverse(options)
-          let typ = case typ {
-            Some(typ) -> typ
-            None -> int_type
+          let typ = case typ, expression {
+            Some(typ), _ -> typ
+            None, g.String(..) -> string_type
+            None, g.Float(..) -> float_type
+            None, _ -> int_type
           }
           use #(c, expression) <- result.try(infer_expression(c, n, expression))
           use c <- result.map(unify(c, typ, expression.typ))

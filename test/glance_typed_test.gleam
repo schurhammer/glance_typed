@@ -1142,6 +1142,20 @@ pub fn bit_string_with_options_test() {
   |> birdie.snap(title: "bit string with options test")
 }
 
+pub fn bit_string_literal_defaults_test() {
+  infer_yaml_with_prelude(
+    "
+    pub fn f(bits: BitArray) {
+      case bits {
+        <<\"a\", 1.5, _:bits>> -> <<\"b\", 2.5>>
+        _ -> bits
+      }
+    }
+    ",
+  )
+  |> birdie.snap(title: "bit string literal defaults test")
+}
+
 pub fn anonymous_fn_with_annotation_test() {
   infer_yaml_with_prelude("pub fn f() { fn(x: Int) -> Int { x } }")
   |> birdie.snap(title: "anonymous fn with annotation test")
