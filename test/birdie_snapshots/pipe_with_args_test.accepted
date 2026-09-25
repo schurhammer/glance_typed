@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: pipe with args test
 file: ./test/glance_typed_test.gleam
 test_name: pipe_with_args_test
@@ -38,6 +38,11 @@ functions:
                 kind: int_literal
                 type: "gleam.Int"
                 value: "3"
+            positional_arguments:
+            - kind: int_literal
+              type: "gleam.Int"
+              value: "3"
+            piped_index: 0
         right:
           kind: fn_capture
           function:
@@ -50,6 +55,11 @@ functions:
               kind: int_literal
               type: "gleam.Int"
               value: "8"
+          positional_arguments:
+          - kind: int_literal
+            type: "gleam.Int"
+            value: "8"
+          piped_index: 1
       right:
         kind: fn_capture
         function:
@@ -63,6 +73,11 @@ functions:
             kind: int_literal
             type: "gleam.Int"
             value: "8"
+        positional_arguments:
+        - kind: int_literal
+          type: "gleam.Int"
+          value: "8"
+        piped_index: 1
     right:
       kind: echo
 - name: sub

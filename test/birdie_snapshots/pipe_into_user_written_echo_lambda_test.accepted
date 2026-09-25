@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: pipe into user written echo lambda test
 file: ./test/glance_typed_test.gleam
 test_name: pipe_into_user_written_echo_lambda_test
@@ -32,4 +32,5 @@ functions:
             kind: local_variable
             type: "gleam.Int"
             name: v
+      piped_index: 0
 

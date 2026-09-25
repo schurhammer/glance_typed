@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: pipe with labelled arg test
 file: ./test/glance_typed_test.gleam
 test_name: pipe_with_labelled_arg_test
@@ -30,6 +30,11 @@ functions:
           kind: string_literal
           type: "gleam.String"
           value: foo
+      positional_arguments:
+      - kind: string_literal
+        type: "gleam.String"
+        value: foo
+      piped_index: 1
 - name: write
   type: "(0, 1, 2) fn(0, 1) -> 2"
   publicity: public

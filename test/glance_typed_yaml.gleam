@@ -499,6 +499,8 @@ fn pipe_target_to_yaml(into: typed.PipeInto) -> cymbal.Yaml {
       function:,
       arguments_before:,
       arguments_after:,
+      positional_arguments:,
+      piped_index:,
     ) ->
       yaml_block(
         [
@@ -521,6 +523,11 @@ fn pipe_target_to_yaml(into: typed.PipeInto) -> cymbal.Yaml {
               expression_to_yaml,
             )),
           )),
+          Some(#(
+            "positional_arguments",
+            yaml_list(positional_arguments, expression_to_yaml),
+          )),
+          Some(#("piped_index", cymbal.int(piped_index))),
         ]
         |> option.values,
       )

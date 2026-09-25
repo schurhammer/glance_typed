@@ -324,6 +324,8 @@ pub type PipeInto {
     function: Expression,
     arguments_before: List(Field(Expression)),
     arguments_after: List(Field(Expression)),
+    positional_arguments: List(Expression),
+    piped_index: Int,
   )
 }
 
@@ -4141,16 +4143,33 @@ fn infer_expression(
         location:,
         function:,
         arguments:,
-        positional_arguments: _,
+        positional_arguments:,
+        argument_order:,
       ) = desugared
       let #(before, after) = list.split(arguments, idx)
       // assert: the left-hand side of the pipe always exists
       let assert #([left], after) = list.split(after, 1)
       let left = left.item
+      let #(positional_before, positional_after) =
+        list.zip(argument_order, positional_arguments)
+        |> list.split_while(fn(argument) { argument.0 != idx })
+      let assert [_piped, ..positional_after] = positional_after
+      let piped_index = list.length(positional_before)
+      let positional_arguments =
+        list.append(positional_before, positional_after)
+        |> list.map(fn(argument) { argument.1 })
       let right = case is_echo, function {
         True, Fn(_, _, [_], _, [Expression(expression: Echo(message:, ..), ..)])
         -> PipeIntoEcho(message)
-        _, _ -> PipeIntoFnCapture(label, function, before, after)
+        _, _ ->
+          PipeIntoFnCapture(
+            label,
+            function,
+            before,
+            after,
+            positional_arguments,
+            piped_index,
+          )
       }
       #(c, Pipe(typ:, location:, left:, right:))
     }
@@ -4215,6 +4234,7 @@ type InferredCall {
     function: Expression,
     arguments: List(Field(Expression)),
     positional_arguments: List(Expression),
+    argument_order: List(Int),
   )
 }
 
@@ -4280,10 +4300,18 @@ fn infer_call(
   let arguments = list.reverse(arguments)
 
   // reorder to positional order via label matching
-  use positional_fields <- result.try(
-    match_fields(arguments, labels)
+  let indexes =
+    list.index_map(arguments, fn(field, i) { map_field(field, fn(_) { i }) })
+  use argument_order <- result.try(
+    match_fields(indexes, labels)
     |> result.map_error(match_error(c, labels, arguments, _)),
   )
+  let items = list.map(arguments, fn(field) { field.item })
+  let positional_fields =
+    list.map(argument_order, fn(i) {
+      let assert [item, ..] = list.drop(items, i)
+      item
+    })
 
   let arg_types = list.map(positional_fields, fn(expr) { expr.typ })
 
@@ -4298,7 +4326,9 @@ fn infer_call(
   use c <- result.map(unify(c, FunctionType(arg_types, typ), fun.typ))
   let #(c, typ) = resolve_type(c, typ)
   let typ = narrow_type(typ, variant_refs)
-  #(c, InferredCall(typ, span, fun, arguments, positional_fields))
+  let call =
+    InferredCall(typ, span, fun, arguments, positional_fields, argument_order)
+  #(c, call)
 }
 
 fn map_binop(name: g.BinaryOperator) -> BinaryOperator {
@@ -5039,9 +5069,21 @@ fn substitute_pipe_into(
       PipeIntoEcho(
         message: option.map(message, substitute_expression(c, rename, _)),
       )
-    PipeIntoFnCapture(label:, function:, arguments_before:, arguments_after:) ->
+    PipeIntoFnCapture(
+      label:,
+      function:,
+      arguments_before:,
+      arguments_after:,
+      positional_arguments:,
+      piped_index:,
+    ) ->
       PipeIntoFnCapture(
         label:,
+        positional_arguments: list.map(
+          positional_arguments,
+          substitute_expression(c, rename, _),
+        ),
+        piped_index:,
         function: substitute_expression(c, rename, function),
         arguments_before: list.map(
           arguments_before,

@@ -1,5 +1,5 @@
 ---
-version: 1.5.4
+version: 2.0.2
 title: pipe test
 file: ./test/glance_typed_test.gleam
 test_name: pipe_test
@@ -27,6 +27,7 @@ functions:
         type: "fn(gleam.Int) -> gleam.Int"
         module: test
         name: double
+      piped_index: 0
 - name: double
   type: "() fn(gleam.Int) -> gleam.Int"
   publicity: public
